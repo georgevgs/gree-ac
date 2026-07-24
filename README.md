@@ -18,6 +18,12 @@ behavior, probe findings, what's inert) lives in
 > encryption, older firmware AES-ECB; the bridge tries ECB first and falls
 > back to GCM automatically.
 
+<p align="center">
+  <img src="docs/screenshots/home.jpg" width="300" alt="Home screen: temperature dial, mode tiles, and fan speed" />
+  &nbsp;&nbsp;
+  <img src="docs/screenshots/features.jpg" width="300" alt="Feature toggles, quiet levels, and the airflow picker" />
+</p>
+
 ## How it works
 
 ```
