@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { m, useReducedMotion } from 'framer-motion';
 import { Icon, type IconName } from './Icon';
 
@@ -11,10 +11,18 @@ const TABS: { key: Tab; label: string; icon: IconName }[] = [
 
 type PillRect = { x: number; y: number; width: number; height: number };
 
+// Scroll-direction detection: ignore jitter smaller than this many pixels.
+const SCROLL_JITTER = 4;
+// Within this distance from the top the bar is always shown.
+const TOP_ZONE = 80;
+// Offscreen travel that clears the bar plus its bottom offset and safe inset.
+const HIDE_Y = 128;
+
 /** Floating glass tab bar, iOS 26 style: a frosted capsule hovering above the
- *  home indicator, content blurring through as it scrolls beneath. The active
- *  tab sits on a brighter pill that slides between tabs. Fixed to the
- *  viewport, so it stays at the bottom regardless of page length.
+ *  home indicator. The active tab sits on a brighter pill that slides between
+ *  tabs. Fixed to the viewport, and it auto-hides: scrolling down slides it
+ *  offscreen so nothing covers the content being read; scrolling up (or
+ *  landing near the top) brings it back.
  *
  *  The pill is one element springing to the measured rect of the active
  *  button — not a framer `layoutId` pair — so the whole app fits LazyMotion's
@@ -24,6 +32,7 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
   const navRef = useRef<HTMLElement>(null);
   const buttonRefs = useRef<Partial<Record<Tab, HTMLButtonElement | null>>>({});
   const [pill, setPill] = useState<PillRect | null>(null);
+  const [hidden, setHidden] = useState(false);
 
   // Glue the pill to the active button. Re-measures when the nav's size
   // changes (font swap-in, orientation change), not just on tab switches.
@@ -42,26 +51,45 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
     return () => observer.disconnect();
   }, [tab]);
 
+  // Hide on scroll down, show on scroll up or near the top. rAF-throttled;
+  // passive so it never blocks the scroll itself.
+  useEffect(() => {
+    let lastY = window.scrollY;
+    let ticking = false;
+    const onScroll = () => {
+      if (ticking) return;
+      ticking = true;
+      requestAnimationFrame(() => {
+        ticking = false;
+        const y = window.scrollY;
+        const delta = y - lastY;
+        lastY = y;
+        if (Math.abs(delta) <= SCROLL_JITTER) return;
+        if (y < TOP_ZONE) {
+          setHidden(false);
+        } else if (delta > 0) {
+          setHidden(true);
+        } else {
+          setHidden(false);
+        }
+      });
+    };
+    window.addEventListener('scroll', onScroll, { passive: true });
+    return () => window.removeEventListener('scroll', onScroll);
+  }, []);
+
   return (
-    <>
-      {/* Bottom scrim: scrolled content fades into the page background before
-          it reaches the bar, instead of being chopped off by the capsule with
-          stray fragments peeking around it (the standard iOS treatment).
-          Sits under the bar (z-30 vs z-40) and ignores taps. */}
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
-        style={{
-          height: 'calc(env(safe-area-inset-bottom) + 112px)',
-          background: 'linear-gradient(to top, var(--bg) 28%, transparent)',
-        }}
-      />
-      <nav
+    <m.nav
       ref={navRef}
       aria-label="Sections"
       className="fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full p-1.5"
+      initial={false}
+      animate={{ y: hidden ? HIDE_Y : 0 }}
+      transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 40 }}
       style={{
         bottom: 'calc(env(safe-area-inset-bottom) + 14px)',
+        // framer drives y; keep the horizontal centering out of its transform.
+        x: '-50%',
         background: 'var(--glass)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.8)',
         backdropFilter: 'blur(20px) saturate(1.8)',
@@ -104,7 +132,6 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
           </m.button>
         );
       })}
-    </nav>
-    </>
+    </m.nav>
   );
 }

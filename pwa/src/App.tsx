@@ -53,7 +53,7 @@ export default function App() {
       >
         <div
           className="mx-auto max-w-md px-5 pt-[max(1.25rem,env(safe-area-inset-top))]"
-          style={{ paddingBottom: 'calc(120px + env(safe-area-inset-bottom))' }}
+          style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
         >
           <AnimatePresence mode="wait" initial={false}>
             <m.div
