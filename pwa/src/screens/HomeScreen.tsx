@@ -56,6 +56,7 @@ export function HomeScreen({ state, error, command }: Props) {
 
   // Inline help toggles for the sections that don't use SectionLabel.
   const [tempHelp, setTempHelp] = useState(false);
+  const [ecoHelp, setEcoHelp] = useState(false);
   const [quietHelp, setQuietHelp] = useState(false);
 
   // Optimistic setpoint: +/− taps update instantly. The first tap of a burst
@@ -186,19 +187,36 @@ export function HomeScreen({ state, error, command }: Props) {
 
         {/* Quick rows */}
         <m.section variants={item} className="card overflow-hidden">
-          <Row
-            icon="leaf"
-            label="Eco mode"
-            divider
-            right={
-              <Switch
-                on={!!state?.powerSave}
-                disabled={controls}
-                label="Eco mode"
-                onToggle={(on) => command(() => acClient.setOption('powerSave', on))}
-              />
-            }
-          />
+          {/* The hairline sits on this wrapper, not the Row, so an open help
+              panel stays inside Eco's section instead of drifting under it. */}
+          <div style={{ borderBottom: '1px solid var(--border)' }}>
+            <Row
+              icon="leaf"
+              label="Eco mode"
+              info={
+                <InfoButton
+                  open={ecoHelp}
+                  onToggle={() => setEcoHelp((v) => !v)}
+                  label="Eco mode"
+                />
+              }
+              right={
+                <Switch
+                  on={!!state?.powerSave}
+                  disabled={controls}
+                  label="Eco mode"
+                  onToggle={(on) => command(() => acClient.setOption('powerSave', on))}
+                />
+              }
+            />
+            <AnimatePresence initial={false}>
+              {ecoHelp && (
+                <div className="px-[18px] pb-[15px]">
+                  <HelpPanel entry={HELP.eco} />
+                </div>
+              )}
+            </AnimatePresence>
+          </div>
           <Row
             icon="moon"
             label="Quiet"

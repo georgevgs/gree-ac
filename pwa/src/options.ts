@@ -91,7 +91,7 @@ export const TOGGLE_OPTIONS: { key: ToggleField; label: string; icon: IconName; 
   { key: 'xfan', label: 'X-Fan', icon: 'rotor' },
   // GREE "Health" = the anion/cold-plasma generator, i.e. this unit's ionizer.
   { key: 'health', label: 'Ionizer', icon: 'sparkles' },
-  { key: 'powerSave', label: 'Eco', icon: 'leaf' },
+  // No powerSave here: Eco already has its own quick row on the Home screen.
   // GREE "StHt": anti-freeze heating that holds the room near 8°C.
   { key: 'safetyHeating', label: '8°C Heat', icon: 'thermo', modes: ['heat'] },
 ];

@@ -56,6 +56,10 @@ export const HELP = {
     note: `The opposite of Turbo, so you can't use both. It has no effect in Dry or Fan mode.`,
   },
 
+  eco: {
+    summary: 'Energy-saving mode. Caps how hard the compressor works to cut power use, so cooling and heating are gentler but cheaper to run.',
+  },
+
   swing: {
     summary: 'Two little room diagrams: the top one shows the room from the side (air tilting up and down), the bottom one from above (air turning left and right). Tap a beam to send the air that way.',
     items: [
@@ -74,7 +78,6 @@ export const HELP = {
       { label: 'Sleep', desc: 'slowly drifts the target overnight (a little warmer in Cool, cooler in Heat) for comfort and lower running cost.' },
       { label: 'X-Fan', desc: 'after you switch off in Cool or Dry, keeps the fan running a few minutes to dry the coil and stop mildew and musty smells.' },
       { label: 'Ionizer', desc: `GREE's "Health" cold-plasma generator. Releases ions to help freshen the air and trap dust, and it's this unit's headline air-quality feature.` },
-      { label: 'Eco', desc: 'energy-saving mode. Caps how hard the compressor works to cut power use.' },
       { label: '8°C Heat', desc: `frost protection. Holds an empty room near 8 °C so it doesn't freeze while you're away. A Heat-mode function, so it's only available there.` },
     ],
   },
