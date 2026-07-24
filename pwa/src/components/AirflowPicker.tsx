@@ -9,11 +9,12 @@ import { AIRFLOW_VERT_ZONES, AIRFLOW_HOR_ZONES, type AirflowZone } from '../opti
  * Full sweep. Sweeping states show a louvre beam rocking between its bounds. */
 
 // Beam radii in viewBox units: visible beam span, the dotted range arc, and
-// the wedge-shaped tap targets.
+// the wedge-shaped tap targets. R_HIT runs past the viewBox (the svg is
+// overflow-visible) so taps overshooting a beam tip still land in its zone.
 const R_IN = 13;
 const R_OUT = 62;
 const R_ARC = 69;
-const R_HIT = 78;
+const R_HIT = 86;
 
 interface Point {
   x: number;
@@ -63,9 +64,9 @@ function arcPath(o: Point, r: number, from: number, to: number): string {
   return `M${x1} ${y1} A${r} ${r} 0 ${hi - lo > 180 ? 1 : 0} 1 ${x2} ${y2}`;
 }
 
-function wedgePath(o: Point, a: number, halfStep: number): string {
-  const [x1, y1] = pt(o, a - halfStep, R_HIT);
-  const [x2, y2] = pt(o, a + halfStep, R_HIT);
+function wedgePath(o: Point, from: number, to: number): string {
+  const [x1, y1] = pt(o, from, R_HIT);
+  const [x2, y2] = pt(o, to, R_HIT);
   return `M${o.x} ${o.y} L${x1} ${y1} A${R_HIT} ${R_HIT} 0 0 1 ${x2} ${y2} Z`;
 }
 
@@ -149,6 +150,10 @@ function AxisSection({
   const { origin, angles, room, unit } = geo;
   const canSweep = zones.some((z) => z.swing);
   const halfStep = Math.abs(angles[1] - angles[0]) / 2;
+  // The fan's outermost hit wedges stretch half a step past the beams, so a
+  // tap just outside the fan still picks the nearest zone.
+  const loEdge = Math.min(...angles);
+  const hiEdge = Math.max(...angles);
 
   const caption = captionFor(kind, zones, zone);
 
@@ -178,7 +183,7 @@ function AxisSection({
       className="flex items-center gap-4 px-[18px] py-4"
       style={divider ? { borderBottom: '1px solid var(--border)' } : undefined}
     >
-      <svg viewBox="0 0 140 104" className="w-[128px] shrink-0" role="group" aria-label={ariaLabel}>
+      <svg viewBox="0 0 140 104" className="w-[128px] shrink-0 overflow-visible" role="group" aria-label={ariaLabel}>
         <path
           d={room}
           fill="none"
@@ -246,7 +251,11 @@ function AxisSection({
         {angles.map((a, i) => (
           <path
             key={i}
-            d={wedgePath(origin, a, halfStep)}
+            d={wedgePath(
+              origin,
+              a - (a === loEdge ? halfStep * 1.5 : halfStep),
+              a + (a === hiEdge ? halfStep * 1.5 : halfStep),
+            )}
             fill="transparent"
             role="button"
             tabIndex={disabled ? -1 : 0}
@@ -365,14 +374,18 @@ function Chip({
       aria-pressed={active}
       disabled={disabled}
       onClick={onClick}
-      className={`rounded-full px-2.5 py-[5px] text-[12px] font-semibold disabled:opacity-40 ${stretch ? 'col-span-2' : ''}`}
-      style={{
-        background: active ? 'var(--accent-soft)' : 'var(--surface-sunken)',
-        color: active ? 'var(--accent)' : 'var(--text-muted)',
-        transition: 'background 0.2s ease, color 0.2s ease',
-      }}
+      className={`-my-2.5 rounded-full py-2.5 disabled:opacity-40 ${stretch ? 'col-span-2' : ''}`}
     >
-      {label}
+      <span
+        className="block rounded-full px-2.5 py-[5px] text-[12px] font-semibold"
+        style={{
+          background: active ? 'var(--accent-soft)' : 'var(--surface-sunken)',
+          color: active ? 'var(--accent)' : 'var(--text-muted)',
+          transition: 'background 0.2s ease, color 0.2s ease',
+        }}
+      >
+        {label}
+      </span>
     </button>
   );
 }

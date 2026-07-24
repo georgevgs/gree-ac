@@ -61,7 +61,11 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
       ticking = true;
       requestAnimationFrame(() => {
         ticking = false;
-        const y = window.scrollY;
+        // Clamp to the real scroll range: iOS rubber-banding reports values
+        // past both ends, and the spring-back read as "scrolling up" — popping
+        // the bar over the content at the page bottom.
+        const maxY = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+        const y = Math.min(Math.max(0, window.scrollY), maxY);
         const delta = y - lastY;
         lastY = y;
         if (Math.abs(delta) <= SCROLL_JITTER) return;

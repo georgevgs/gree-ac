@@ -56,7 +56,7 @@ export function FeatureTiles({ values, mode, disabled, onToggle }: Props) {
               className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-full"
               style={{
                 background: on ? 'var(--accent)' : 'var(--surface-2)',
-                color: on ? '#ffffff' : 'var(--text-subtle)',
+                color: on ? 'var(--on-accent)' : 'var(--text-subtle)',
                 transition: 'background 0.25s ease, color 0.25s ease',
               }}
             >

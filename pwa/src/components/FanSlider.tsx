@@ -96,42 +96,47 @@ export function FanSlider({ value, disabled, onChange, help }: Props) {
         </AnimatePresence>
       )}
       <div
-        ref={trackRef}
         role="slider"
         tabIndex={disabled ? -1 : 0}
         aria-label="Fan speed"
         aria-valuemin={0}
         aria-valuemax={steps - 1}
-        aria-valuenow={restIdx}
+        aria-valuenow={value == null ? undefined : restIdx}
         aria-valuetext={label}
         onKeyDown={onKeyDown}
         onPointerDown={onDown}
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
-        className="relative h-3 touch-none select-none rounded-full"
-        style={{ background: 'var(--surface-sunken)', boxShadow: 'var(--shadow-inset)', cursor: disabled ? 'default' : 'pointer' }}
+        className="-mb-[18px] -mt-3.5 touch-none select-none pb-[18px] pt-3.5"
+        style={{ cursor: disabled ? 'default' : 'pointer' }}
       >
         <div
-          className="absolute left-0 top-0 h-full rounded-full"
-          style={{
-            width: `calc(${frac} * (100% - ${KNOB}px) + ${KNOB}px)`,
-            background: 'var(--accent)',
-            transition: dragIdx == null ? 'width 0.25s var(--ease-out)' : 'none',
-          }}
-        />
-        <div
-          className="absolute top-1/2 -translate-y-1/2 rounded-full"
-          style={{
-            left: `calc(${frac} * (100% - ${KNOB}px))`,
-            width: KNOB,
-            height: KNOB,
-            background: 'var(--thumb)',
-            border: '1px solid var(--border)',
-            boxShadow: 'var(--shadow-sm)',
-            transition: dragIdx == null ? 'left 0.25s var(--ease-out)' : 'none',
-          }}
-        />
+          ref={trackRef}
+          className="relative h-3 rounded-full"
+          style={{ background: 'var(--surface-sunken)', boxShadow: 'var(--shadow-inset)' }}
+        >
+          <div
+            className="absolute left-0 top-0 h-full rounded-full"
+            style={{
+              width: `calc(${frac} * (100% - ${KNOB}px) + ${KNOB}px)`,
+              background: 'var(--accent)',
+              transition: dragIdx == null ? 'width 0.25s var(--ease-out)' : 'none',
+            }}
+          />
+          <div
+            className="absolute top-1/2 -translate-y-1/2 rounded-full"
+            style={{
+              left: `calc(${frac} * (100% - ${KNOB}px))`,
+              width: KNOB,
+              height: KNOB,
+              background: 'var(--thumb)',
+              border: '1px solid var(--border)',
+              boxShadow: 'var(--shadow-sm)',
+              transition: dragIdx == null ? 'left 0.25s var(--ease-out)' : 'none',
+            }}
+          />
+        </div>
       </div>
     </section>
   );

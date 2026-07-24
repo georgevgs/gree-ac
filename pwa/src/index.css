@@ -1,7 +1,6 @@
 @import "tailwindcss";
 @import "@fontsource-variable/plus-jakarta-sans";
 @import "@fontsource/space-mono/400.css";
-@import "@fontsource/space-mono/700.css";
 
 /* ─────────────────────────────────────────────────────────────────────────
    Umi — "AC controller design system" (claude.ai/design, ACControllerApp).
@@ -41,7 +40,7 @@
   --on-accent: light-dark(oklch(1 0 0), oklch(0.15 0.02 165));
 
   /* --- Status --- */
-  --warning-500: oklch(0.8 0.14 85);
+  --warning-500: light-dark(oklch(0.55 0.11 85), oklch(0.8 0.14 85));
   --danger-500: light-dark(oklch(0.62 0.18 25), oklch(0.7 0.17 25));
   --green-600: light-dark(oklch(0.62 0.13 165), oklch(0.78 0.12 165));
 
@@ -110,6 +109,16 @@ html,
 body,
 #root {
   height: 100%;
+}
+
+/* No 350 ms double-tap-zoom delay on rapid taps (stepper, tiles, wedges).
+   In @layer base so the slider's touch-none utility still wins for drags. */
+@layer base {
+  button,
+  [role="button"],
+  [role="slider"] {
+    touch-action: manipulation;
+  }
 }
 
 body {
