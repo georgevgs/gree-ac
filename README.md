@@ -109,21 +109,25 @@ Tunnel). Don't introduce a second mechanism, and don't port-forward.
 
 ## Security model
 
-The default posture is **trusted LAN**: no auth, CORS open. That is fine for a
-private home Wi-Fi and nothing else.
+The default posture is **trusted LAN**: no auth, and no cross-origin access —
+the bridge serves the PWA same-origin, so CORS stays off unless `CORS_ORIGIN`
+opts in (only needed when the app runs elsewhere, e.g. the Vite dev server).
+That is fine for a private home Wi-Fi and nothing else.
 
 - **Never port-forward the bridge to the internet.** Use Tailscale or a
   Cloudflare Tunnel with access control for remote reach.
-- **Set `API_TOKEN`** whenever anyone untrusted can join the network, or the
-  bridge is reachable over a tunnel. Every `/api` request then needs
+- **Set `API_TOKEN`** (defense-in-depth; generate one with
+  `openssl rand -hex 32`) whenever anyone untrusted can join the network, or
+  the bridge is reachable over a tunnel. Every `/api` request then needs
   `Authorization: Bearer <token>` (or `?token=` for `EventSource`, which can't
-  send headers; note query tokens can land in access logs). The comparison is
-  constant-time, and 401s use the same `{"error": ...}` envelope as every
-  other failure.
-- **Open CORS plus no token means LAN drive-by is possible**: any website open
-  on a device inside your network could script the API. Browsers increasingly
-  block public-to-private requests, but don't rely on that; a token closes it
-  properly, and `CORS_ORIGIN` can pin the UI origin.
+  send headers; note query tokens can land in access logs). The PWA sends the
+  token from its Settings screen. The comparison is constant-time, and 401s
+  use the same `{"error": ...}` envelope as every other failure.
+- **Browser drive-by writes are blocked twice over**: every POST must carry
+  `Content-Type: application/json`, which keeps cross-site writes out of the
+  CORS "simple request" category and forces a preflight — and with CORS off by
+  default, the preflight fails. A token still closes the gap for non-browser
+  callers already on the network.
 - The daemon logs a startup warning whenever `/api` runs without auth.
 - Nothing in this repo contains device secrets. The GREE "generic" AES keys in
   the crypto layer are protocol constants every client implementation ships,

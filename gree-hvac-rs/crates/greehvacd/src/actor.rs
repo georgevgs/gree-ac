@@ -112,10 +112,28 @@ fn serve(
     let mut last_poll = Instant::now();
 
     loop {
+        // Drain the whole queue into one merged batch — the latest value for a
+        // property wins — so a burst of taps costs one cmd datagram and one
+        // status request instead of a pair per tap.
+        let mut queued: Vec<(Property, i64)> = Vec::new();
+        let mut replies = Vec::new();
         while let Ok(Command::Set(props, reply)) = cmd_rx.try_recv() {
-            match client.send_command(&props) {
+            for (property, value) in props {
+                if let Some(slot) = queued.iter_mut().find(|(p, _)| *p == property) {
+                    slot.1 = value;
+                } else {
+                    queued.push((property, value));
+                }
+            }
+            replies.push(reply);
+        }
+
+        if !queued.is_empty() {
+            match client.send_command(&queued) {
                 Ok(()) => {
-                    let _ = reply.send(Ok(()));
+                    for reply in replies {
+                        let _ = reply.send(Ok(()));
+                    }
                     // Ask for a fresh snapshot right away: the unit answers a
                     // command with the values it actually accepted, so the UI's
                     // optimistic echo is corrected within one round trip.
@@ -127,7 +145,9 @@ fn serve(
                 }
                 Err(e) => {
                     log::warn!("command send failed: {e}");
-                    let _ = reply.send(Err(e.to_string()));
+                    for reply in replies {
+                        let _ = reply.send(Err(e.to_string()));
+                    }
                     return;
                 }
             }

@@ -4,6 +4,11 @@
 
 use crate::error::{Error, Result};
 
+/// Setpoint bounds the protocol accepts, in °C. Enforced by
+/// [`value_to_vendor`] so every write path shares one source of truth.
+pub const TEMP_MIN: i64 = 16;
+pub const TEMP_MAX: i64 = 30;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum Property {
     Power,
@@ -264,7 +269,10 @@ pub fn value_names(p: Property) -> Vec<&'static str> {
 }
 
 /// Friendly JSON value -> vendor integer. Accepts either the enum name
-/// (`"heat"`) or a raw integer passthrough. Rejects read-only properties.
+/// (`"heat"`) or an integer, but only one the property's value table carries —
+/// an arbitrary integer would go on the wire unchecked otherwise. The
+/// temperature setpoint is range-checked against [`TEMP_MIN`]/[`TEMP_MAX`].
+/// Rejects read-only properties.
 pub fn value_to_vendor(p: Property, v: &serde_json::Value) -> Result<i64> {
     if p.read_only() {
         return Err(Error::ReadOnly(p.name()));
@@ -282,13 +290,24 @@ pub fn value_to_vendor(p: Property, v: &serde_json::Value) -> Result<i64> {
                     });
             }
             if let Some(n) = v.as_i64() {
-                return Ok(n);
+                if table.iter().any(|(_, code)| *code == n) {
+                    return Ok(n);
+                }
+                return Err(Error::UnknownProperty(format!("{}={}", p.name(), n)));
             }
             Err(Error::UnknownProperty(p.name().to_string()))
         }
-        None => v
-            .as_i64()
-            .ok_or_else(|| Error::UnknownProperty(p.name().to_string())),
+        None => {
+            let n = v
+                .as_i64()
+                .ok_or_else(|| Error::UnknownProperty(p.name().to_string()))?;
+            if let Property::Temperature = p {
+                if !(TEMP_MIN..=TEMP_MAX).contains(&n) {
+                    return Err(Error::OutOfRange(p.name(), TEMP_MIN, TEMP_MAX));
+                }
+            }
+            Ok(n)
+        }
     }
 }
 
@@ -333,6 +352,34 @@ mod tests {
         .unwrap();
         assert!(out.contains(&(Property::Mode, 4)));
         assert!(out.contains(&(Property::Temperature, 22)));
+    }
+
+    #[test]
+    fn enum_ints_outside_the_value_table_are_rejected() {
+        assert_eq!(value_to_vendor(Property::Mode, &serde_json::json!(4)).unwrap(), 4);
+        assert!(value_to_vendor(Property::Mode, &serde_json::json!(999)).is_err());
+        assert!(value_to_vendor(Property::FanSpeed, &serde_json::json!(-1)).is_err());
+        assert!(value_to_vendor(Property::Power, &serde_json::json!(2)).is_err());
+    }
+
+    #[test]
+    fn temperature_is_range_checked() {
+        assert_eq!(
+            value_to_vendor(Property::Temperature, &serde_json::json!(TEMP_MIN)).unwrap(),
+            TEMP_MIN
+        );
+        assert_eq!(
+            value_to_vendor(Property::Temperature, &serde_json::json!(TEMP_MAX)).unwrap(),
+            TEMP_MAX
+        );
+        assert!(matches!(
+            value_to_vendor(Property::Temperature, &serde_json::json!(TEMP_MIN - 1)),
+            Err(Error::OutOfRange(_, _, _))
+        ));
+        assert!(matches!(
+            value_to_vendor(Property::Temperature, &serde_json::json!(86)),
+            Err(Error::OutOfRange(_, _, _))
+        ));
     }
 
     #[test]

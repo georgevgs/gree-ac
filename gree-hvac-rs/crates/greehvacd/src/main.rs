@@ -40,8 +40,9 @@ struct Args {
     /// Polling cadence against the AC, in ms.
     #[arg(long, env = "POLL_INTERVAL_MS", default_value_t = 3000)]
     poll_interval_ms: u64,
-    /// Comma-separated CORS allowlist, or `*` for any origin (the trusted-LAN
-    /// default). Only matters when the PWA is served from somewhere else.
+    /// Comma-separated CORS allowlist, or `*` for any origin. Unset (the
+    /// default) allows no cross-origin access at all — only needed when the
+    /// PWA is served from somewhere else, e.g. the Vite dev server.
     #[arg(long, env = "CORS_ORIGIN")]
     cors_origin: Option<String>,
     /// Directory of built PWA files to serve (pwa/dist). Omit to run API-only.

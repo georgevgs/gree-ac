@@ -4,7 +4,7 @@
 
 use std::collections::HashMap;
 use std::io::ErrorKind;
-use std::net::{SocketAddr, ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, SocketAddr, ToSocketAddrs, UdpSocket};
 use std::time::{Duration, Instant};
 
 use crate::crypto::EncryptionService;
@@ -58,6 +58,14 @@ pub struct Client {
     config: ClientConfig,
     enc: EncryptionService,
     cid: Option<String>,
+    /// Source IP the session accepts datagrams from. Set up front when the
+    /// target is unicast; for a broadcast target it is unknown until the scan
+    /// is answered, and locks to the source of the accepted `dev` pack. During
+    /// (re)connect the generic keys are public, so without this any LAN host
+    /// answering the scan first could complete the bind with its own key.
+    /// A software filter rather than `socket.connect()`, because `send_to` on
+    /// a connected UDP socket errors on macOS.
+    peer: Option<IpAddr>,
     properties: HashMap<Property, i64>,
     /// When we last decoded a datagram from the device. Refreshed on every
     /// reply, including a status poll that changed nothing — that is still
@@ -78,12 +86,19 @@ impl Client {
         socket.set_broadcast(true)?;
         socket.set_read_timeout(Some(config.read_timeout))?;
 
+        let peer = if is_broadcast_address(target.ip()) {
+            None
+        } else {
+            Some(target.ip())
+        };
+
         let mut client = Self {
             socket,
             target,
             config,
             enc: EncryptionService::new(),
             cid: None,
+            peer,
             properties: HashMap::new(),
             last_rx: Instant::now(),
         };
@@ -133,18 +148,27 @@ impl Client {
                 // Unreadable datagrams are ignored rather than fatal: the scan
                 // is a broadcast, so a second Gree device on the LAN may answer
                 // too. Keep listening until the connect deadline.
-                Ok((n, _)) => match self.decode(&buf[..n]) {
-                    Ok(Pack::Handshake { cid, mac }) => {
-                        // Most EWPE dev packs carry `"cid":""` with the real id
-                        // in `mac`; an empty cid must fall through (JS: cid || mac).
-                        self.cid = cid.filter(|s| !s.is_empty()).or(mac);
-                        self.send_bind()?; // attempt 1 -> ECB
-                        bind_deadline = Some(Instant::now() + self.config.bind_timeout);
+                Ok((n, from)) => {
+                    if !self.accepts(from.ip()) {
+                        log::debug!("ignoring {n}-byte datagram from unexpected source {from}");
+                        continue;
                     }
-                    Ok(Pack::BindOk { .. }) => return Ok(()), // key installed in decrypt
-                    Ok(_) => {}
-                    Err(e) => log::debug!("ignoring undecodable {n}-byte datagram: {e}"),
-                },
+                    match self.decode(&buf[..n]) {
+                        Ok(Pack::Handshake { cid, mac }) => {
+                            // The device that answered the scan is the session
+                            // peer from here on.
+                            self.peer = Some(from.ip());
+                            // Most EWPE dev packs carry `"cid":""` with the real id
+                            // in `mac`; an empty cid must fall through (JS: cid || mac).
+                            self.cid = cid.filter(|s| !s.is_empty()).or(mac);
+                            self.send_bind()?; // attempt 1 -> ECB
+                            bind_deadline = Some(Instant::now() + self.config.bind_timeout);
+                        }
+                        Ok(Pack::BindOk { .. }) => return Ok(()), // key installed in decrypt
+                        Ok(_) => {}
+                        Err(e) => log::debug!("ignoring undecodable {n}-byte datagram: {e}"),
+                    }
+                }
                 Err(e) if is_timeout(&e) => continue,
                 Err(e) => return Err(Error::Io(e)),
             }
@@ -204,19 +228,25 @@ impl Client {
             // the last bind, or any stray UDP on our ephemeral port would
             // otherwise cost a full scan/bind re-handshake and a visible
             // offline blip. Drop it and keep the session.
-            Ok((n, _)) => match self.decode(&buf[..n]) {
-                Ok(pack) => {
-                    // A decoded datagram is our device answering (a foreign
-                    // unit's reply would not decrypt under our key), so it is
-                    // contact even when it carries no state change.
-                    self.last_rx = Instant::now();
-                    Ok(self.apply(pack))
+            Ok((n, from)) => {
+                if !self.accepts(from.ip()) {
+                    log::debug!("ignoring {n}-byte datagram from unexpected source {from}");
+                    return Ok(None);
                 }
-                Err(e) => {
-                    log::debug!("ignoring undecodable {n}-byte datagram: {e}");
-                    Ok(None)
+                match self.decode(&buf[..n]) {
+                    Ok(pack) => {
+                        // A decoded datagram is our device answering (a foreign
+                        // unit's reply would not decrypt under our key), so it is
+                        // contact even when it carries no state change.
+                        self.last_rx = Instant::now();
+                        Ok(self.apply(pack))
+                    }
+                    Err(e) => {
+                        log::debug!("ignoring undecodable {n}-byte datagram: {e}");
+                        Ok(None)
+                    }
                 }
-            },
+            }
             Err(e) if is_timeout(&e) => Ok(None),
             Err(e) => Err(Error::Io(e)),
         }
@@ -228,7 +258,13 @@ impl Client {
     pub fn poll_json(&mut self) -> Result<Option<serde_json::Value>> {
         let mut buf = [0u8; 2048];
         match self.socket.recv_from(&mut buf) {
-            Ok((n, _)) => self.decrypt_datagram(&buf[..n]).map(Some),
+            Ok((n, from)) => {
+                if !self.accepts(from.ip()) {
+                    log::debug!("ignoring {n}-byte datagram from unexpected source {from}");
+                    return Ok(None);
+                }
+                self.decrypt_datagram(&buf[..n]).map(Some)
+            }
             Err(e) if is_timeout(&e) => Ok(None),
             Err(e) => Err(Error::Io(e)),
         }
@@ -308,8 +344,44 @@ impl Client {
         self.socket.send_to(bytes, self.target)?;
         Ok(())
     }
+
+    /// Whether a datagram from this source belongs to the session. Ports are
+    /// not compared — some firmware replies from an ephemeral port, the IP is
+    /// what identifies the device.
+    fn accepts(&self, source: IpAddr) -> bool {
+        if let Some(peer) = self.peer {
+            peer == source
+        } else {
+            true
+        }
+    }
 }
 
 fn is_timeout(e: &std::io::Error) -> bool {
     matches!(e.kind(), ErrorKind::WouldBlock | ErrorKind::TimedOut)
+}
+
+/// Whether the configured target looks like a scan broadcast (the limited
+/// broadcast, or an `x.x.x.255` directed broadcast — the subnet mask is
+/// unknowable here, and every home /24 ends in .255). Anything else is treated
+/// as the device's own unicast address.
+fn is_broadcast_address(ip: IpAddr) -> bool {
+    if let IpAddr::V4(v4) = ip {
+        v4.is_broadcast() || 255 == v4.octets()[3]
+    } else {
+        false
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn broadcast_targets_are_recognised() {
+        assert!(is_broadcast_address("255.255.255.255".parse().unwrap()));
+        assert!(is_broadcast_address("192.168.1.255".parse().unwrap()));
+        assert!(!is_broadcast_address("192.168.1.50".parse().unwrap()));
+        assert!(!is_broadcast_address("127.0.0.1".parse().unwrap()));
+    }
 }

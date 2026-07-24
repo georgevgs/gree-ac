@@ -16,8 +16,12 @@
 //! response echoes what we sent and the device's confirmation lands moments
 //! later on `/api/events` (and in the next `/api/state`).
 //!
-//! CORS origin is configurable (default: any). If a bearer token is provided,
-//! every /api request must carry `Authorization: Bearer <token>`.
+//! Every POST must carry `Content-Type: application/json`; anything else is
+//! refused with 415 before the handler runs, which also keeps cross-site
+//! writes out of the CORS "simple request" category. CORS itself is opt-in:
+//! with no allowlist configured the daemon adds no cross-origin allowance at
+//! all (the PWA is served same-origin). If a bearer token is provided, every
+//! /api request must carry `Authorization: Bearer <token>`.
 
 use std::convert::Infallible;
 use std::path::PathBuf;
@@ -89,6 +93,7 @@ pub fn router(state: AppState, config: ApiConfig) -> Router {
         // Unknown /api paths must answer with the same {"error": ...} envelope
         // instead of falling through to the SPA fallback (or an empty 404).
         .route("/api/*rest", any(api_not_found))
+        .layer(from_fn(require_json))
         .layer(from_fn(no_store))
         .with_state(state);
 
@@ -105,7 +110,9 @@ pub fn router(state: AppState, config: ApiConfig) -> Router {
     };
 
     // CORS is the outermost layer so it answers preflight OPTIONS before auth.
-    app = app.layer(cors_layer(config.cors_origin));
+    if let Some(cors) = cors_layer(config.cors_origin) {
+        app = app.layer(cors);
+    }
     app
 }
 
@@ -152,14 +159,21 @@ async fn cache_static(request: Request, next: Next) -> Response {
     response
 }
 
-/// `*` (or unset) allows any origin — the trusted-LAN default. Otherwise a
-/// comma-separated allowlist, matching what the Node bridge accepted.
-fn cors_layer(origin: Option<String>) -> CorsLayer {
-    let layer = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+/// Unset (or blank) means no CORS layer at all: the daemon serves the PWA
+/// same-origin, so no cross-origin allowance is needed. Otherwise a
+/// comma-separated allowlist (the Vite dev-server case), or `*` for any origin
+/// — an explicit, deliberate opt-in.
+fn cors_layer(origin: Option<String>) -> Option<CorsLayer> {
+    let spec = origin?;
+    let spec = spec.trim();
+    if spec.is_empty() {
+        return None;
+    }
 
-    let Some(spec) = origin.filter(|s| !s.trim().is_empty() && "*" != s.trim()) else {
-        return layer.allow_origin(Any);
-    };
+    let layer = CorsLayer::new().allow_methods(Any).allow_headers(Any);
+    if "*" == spec {
+        return Some(layer.allow_origin(Any));
+    }
 
     let origins: Vec<HeaderValue> = spec
         .split(',')
@@ -167,10 +181,10 @@ fn cors_layer(origin: Option<String>) -> CorsLayer {
         .collect();
 
     if origins.is_empty() {
-        log::warn!("CORS_ORIGIN has no parseable origin; allowing any");
-        return layer.allow_origin(Any);
+        log::warn!("CORS_ORIGIN has no parseable origin; cross-origin access stays off");
+        return None;
     }
-    layer.allow_origin(AllowOrigin::list(origins))
+    Some(layer.allow_origin(AllowOrigin::list(origins)))
 }
 
 // ---------------------------------------------------------------- reads
@@ -187,6 +201,11 @@ async fn get_state(State(state): State<AppState>) -> Json<AcState> {
 async fn events(
     State(state): State<AppState>,
 ) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+    // Subscribe before reading the snapshot: an update published between the
+    // two would otherwise never reach this client, and events are full
+    // snapshots, so it would stay stale until the next change.
+    let receiver = state.updates.subscribe();
+
     // Emit the current state immediately so a freshly-connected client has
     // something to render without waiting for the next change.
     let device = device(&state);
@@ -195,7 +214,7 @@ async fn events(
         SseEvent::default().data(serde_json::to_string(&dto).unwrap_or_default()),
     ));
 
-    let live = BroadcastStream::new(state.updates.subscribe()).filter_map(|result| match result {
+    let live = BroadcastStream::new(receiver).filter_map(|result| match result {
         Ok(payload) => Some(Ok(SseEvent::default().data(payload))),
         Err(_) => None, // lagged receiver: drop and continue (state is self-healing)
     });
@@ -430,6 +449,30 @@ async fn api_not_found() -> ApiError {
     ApiError(StatusCode::NOT_FOUND, "unknown API route".to_string())
 }
 
+/// Writes must declare `Content-Type: application/json`. A cross-site page can
+/// fire a POST with `text/plain` (or no Content-Type) as a CORS "simple
+/// request" that skips preflight entirely; requiring the JSON media type moves
+/// every write behind preflight, where the (absent-by-default) CORS policy
+/// rejects it.
+async fn require_json(request: Request, next: Next) -> Result<Response, ApiError> {
+    if Method::POST == *request.method() {
+        let is_json = request
+            .headers()
+            .get(header::CONTENT_TYPE)
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| value.split(';').next())
+            .map(|essence| essence.trim().eq_ignore_ascii_case("application/json"))
+            .unwrap_or(false);
+        if !is_json {
+            return Err(ApiError(
+                StatusCode::UNSUPPORTED_MEDIA_TYPE,
+                "Content-Type must be application/json".to_string(),
+            ));
+        }
+    }
+    Ok(next.run(request).await)
+}
+
 /// Live device state must never be cached — a browser would otherwise reuse a
 /// stale reading (e.g. after a change from the physical remote) until a reload.
 async fn no_store(request: Request, next: Next) -> Response {
@@ -501,6 +544,17 @@ mod tests {
     /// thread acks every command and records it, so write paths can be driven
     /// without hardware.
     fn harness(online: bool) -> (Router, SentCommands) {
+        harness_with(
+            online,
+            ApiConfig {
+                cors_origin: None,
+                token: None,
+                public_dir: None,
+            },
+        )
+    }
+
+    fn harness_with(online: bool, config: ApiConfig) -> (Router, SentCommands) {
         let props = Props::from([
             (Property::Power, 1),
             (Property::Mode, 1),
@@ -532,15 +586,7 @@ mod tests {
             cmd_tx,
             updates,
         };
-        let router = router(
-            state,
-            ApiConfig {
-                cors_origin: None,
-                token: None,
-                public_dir: None,
-            },
-        );
-        (router, sent)
+        (router(state, config), sent)
     }
 
     async fn call(router: &Router, method: &str, path: &str, body: &str) -> (StatusCode, Value) {
@@ -672,6 +718,106 @@ mod tests {
         }
 
         // A rejected request must never have reached the device.
+        assert!(sent.read().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn posts_without_a_json_content_type_are_rejected() {
+        let (router, sent) = harness(true);
+
+        let no_header = Request::builder()
+            .method("POST")
+            .uri("/api/power")
+            .body(Body::from(r#"{"on":true}"#))
+            .unwrap();
+        let response = router.clone().oneshot(no_header).await.unwrap();
+        assert_eq!(StatusCode::UNSUPPORTED_MEDIA_TYPE, response.status());
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json!("Content-Type must be application/json"), body["error"]);
+
+        let text_plain = Request::builder()
+            .method("POST")
+            .uri("/api/power")
+            .header(header::CONTENT_TYPE, "text/plain")
+            .body(Body::from(r#"{"on":true}"#))
+            .unwrap();
+        let response = router.clone().oneshot(text_plain).await.unwrap();
+        assert_eq!(StatusCode::UNSUPPORTED_MEDIA_TYPE, response.status());
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(json!("Content-Type must be application/json"), body["error"]);
+
+        // A rejected request must never have reached the device.
+        assert!(sent.read().unwrap().is_empty());
+    }
+
+    #[tokio::test]
+    async fn a_json_content_type_with_charset_is_accepted() {
+        let (router, sent) = harness(true);
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/power")
+            .header(header::CONTENT_TYPE, "application/json; charset=utf-8")
+            .body(Body::from(r#"{"on":true}"#))
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+        assert_eq!(vec![vec![(Property::Power, 1)]], *sent.read().unwrap());
+    }
+
+    #[tokio::test]
+    async fn no_cors_allowance_unless_an_origin_is_allowlisted() {
+        let (default_router, _) = harness(true);
+        let request = Request::builder()
+            .uri("/api/state")
+            .header(header::ORIGIN, "http://evil.example")
+            .body(Body::empty())
+            .unwrap();
+        let response = default_router.oneshot(request).await.unwrap();
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
+
+        let (allowlisted, _) = harness_with(
+            true,
+            ApiConfig {
+                cors_origin: Some("http://localhost:5173".to_string()),
+                token: None,
+                public_dir: None,
+            },
+        );
+        let request = Request::builder()
+            .uri("/api/state")
+            .header(header::ORIGIN, "http://localhost:5173")
+            .body(Body::empty())
+            .unwrap();
+        let response = allowlisted.oneshot(request).await.unwrap();
+        assert_eq!(
+            "http://localhost:5173",
+            response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN]
+        );
+    }
+
+    #[tokio::test]
+    async fn raw_properties_reject_out_of_table_and_out_of_range_values() {
+        let (router, sent) = harness(true);
+
+        let (status, body) = call(&router, "POST", "/api/properties", r#"{"mode":999}"#).await;
+        assert_eq!(StatusCode::BAD_REQUEST, status);
+        assert_eq!(json!("unknown property: mode=999"), body["error"]);
+
+        let (status, body) =
+            call(&router, "POST", "/api/properties", r#"{"temperature":86}"#).await;
+        assert_eq!(StatusCode::BAD_REQUEST, status);
+        assert_eq!(json!("temperature out of range: must be 16-30"), body["error"]);
+
         assert!(sent.read().unwrap().is_empty());
     }
 

@@ -41,9 +41,9 @@ cargo run  -p greehvacd -- --host 192.168.1.50
 cargo run  -p greehvac-probe              # read-only diagnostic, see below
 ```
 
-`greehvac` compiles on stock stable. `greehvacd` is pinned to `clap ~4.4` so
-it builds on older toolchains (Debian Bookworm on the Pi ships an older
-rustc); newer clap needs the edition-2024 cargo feature.
+`greehvac` compiles on stock stable. `Cargo.lock` keeps `clap` at 4.4 so the
+workspace still builds on older toolchains (Debian Bookworm on the Pi ships an
+older rustc); newer clap needs the edition-2024 cargo feature.
 
 ## Configuration
 
@@ -58,7 +58,7 @@ from.
 | `--port` | `PORT` | `8481` | HTTP port for the API and the PWA. |
 | `--bind` | `BIND_ADDR` | `0.0.0.0` | HTTP listen address. |
 | `--poll-interval-ms` | `POLL_INTERVAL_MS` | `3000` | Status cadence against the AC. |
-| `--cors-origin` | `CORS_ORIGIN` | any | Comma-separated allowlist, or `*`. |
+| `--cors-origin` | `CORS_ORIGIN` | unset | Comma-separated allowlist, or `*`. Unset = no cross-origin access (the PWA is served same-origin). |
 | `--public-dir` | `PUBLIC_DIR` | unset | Built PWA to serve (`pwa/dist`). Omit for API-only. |
 | `--token` | `API_TOKEN` | unset | Require `Authorization: Bearer <token>` on `/api`. |
 | | `RUST_LOG` / `GREE_LOG_LEVEL` | `info` | Log filter. |
@@ -81,9 +81,11 @@ from.
 Every write answers with the fresh DTO, so a client can apply the response
 directly. Writes are optimistic by one round trip: UDP has no ack, so the
 response echoes what was sent and the device's confirmation follows on
-`/api/events` moments later. Errors are `{"error":"..."}`: `400` for a bad
-value (the message lists what would have been accepted), `503` when the AC is
-unreachable, and the same envelope on `401` and unknown `/api` routes.
+`/api/events` moments later. Every POST must carry
+`Content-Type: application/json`; anything else is refused with `415`. Errors
+are `{"error":"..."}`: `400` for a bad value (the message lists what would
+have been accepted), `503` when the AC is unreachable, and the same envelope
+on `415`, `401`, and unknown `/api` routes.
 
 ```json
 {

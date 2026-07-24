@@ -19,6 +19,8 @@ pub enum Error {
     ConnectTimeout,
     #[error("unknown property: {0}")]
     UnknownProperty(String),
+    #[error("{0} out of range: must be {1}-{2}")]
+    OutOfRange(&'static str, i64, i64),
     #[error("read-only property: {0}")]
     ReadOnly(&'static str),
 }

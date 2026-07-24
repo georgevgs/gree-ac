@@ -15,8 +15,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use greehvac::property::{self, Property};
 use serde::Serialize;
 
-pub const TEMP_MIN: i64 = 16;
-pub const TEMP_MAX: i64 = 30;
+pub use greehvac::property::{TEMP_MAX, TEMP_MIN};
 
 /// Mirrors `pwa/src/api/types.ts` field for field.
 #[derive(Serialize)]
