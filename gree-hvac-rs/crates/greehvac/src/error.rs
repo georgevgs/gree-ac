@@ -1,0 +1,26 @@
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+#[non_exhaustive]
+pub enum Error {
+    #[error("socket error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("base64 error: {0}")]
+    Base64(#[from] base64::DecodeError),
+    #[error("crypto: decryption failed")]
+    Decrypt,
+    #[error("crypto: encryption failed")]
+    Encrypt,
+    #[error("not connected")]
+    NotConnected,
+    #[error("connect timed out")]
+    ConnectTimeout,
+    #[error("unknown property: {0}")]
+    UnknownProperty(String),
+    #[error("read-only property: {0}")]
+    ReadOnly(&'static str),
+}
+
+pub type Result<T> = std::result::Result<T, Error>;

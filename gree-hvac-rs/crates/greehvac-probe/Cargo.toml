@@ -1,0 +1,17 @@
+[package]
+name = "greehvac-probe"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Read-only LAN diagnostic: watch raw Gree property codes change"
+
+[[bin]]
+name = "greehvac-probe"
+path = "src/main.rs"
+
+[dependencies]
+greehvac = { path = "../greehvac" }
+serde_json = "1"
+clap = { version = "~4.4", features = ["derive", "env"] }
+dotenvy = "0.15"
+env_logger = "0.11"

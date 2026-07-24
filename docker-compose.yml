@@ -1,0 +1,22 @@
+services:
+  ac-bridge:
+    build: ./gree-hvac-rs
+    container_name: toyotomi-ac-bridge
+    restart: unless-stopped
+    # Host networking so GREE's UDP LAN protocol (port 7000, scan/bind/poll)
+    # can reach the AC. The bridge then listens on PORT (from .env) on the host.
+    network_mode: host
+    env_file:
+      - ./.env
+    # The PWA is built on the host; mount it in so the bridge serves it too.
+    # Drop both blocks to run API-only.
+    volumes:
+      - ./pwa/dist:/app/public:ro
+    environment:
+      # Overrides any PUBLIC_DIR in .env, which points at a host path.
+      - PUBLIC_DIR=/app/public
+    # If you must use bridge networking instead of host, comment out
+    # network_mode above and uncomment ports (UDP discovery may be less
+    # reliable across the docker bridge):
+    # ports:
+    #   - "8481:8481"

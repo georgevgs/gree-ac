@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/greehvac", "crates/greehvacd", "crates/greehvac-probe"]
+
+[workspace.package]
+edition = "2021"
+license = "GPL-3.0-only"
+
+# Tuned for the Pi Zero W: small binary, small resident set.
+[profile.release]
+opt-level = "z"     # optimize for size over speed
+lto = true          # cross-crate inlining + dead-code elimination
+codegen-units = 1   # maximize optimization, shrink output
+strip = true        # drop symbols
+panic = "abort"     # no unwinding tables; fine for a daemon

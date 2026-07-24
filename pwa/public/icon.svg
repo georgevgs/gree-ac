@@ -1,0 +1,50 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <!-- Umi (海, "sea") AC. Full-bleed square, edge to edge: iOS applies its own
+       squircle mask (no border), Android its maskable mask. The glyph is sized
+       to fill the tile while staying clear of the mask's safe zone.
+
+       Art follows the app's tokens (src/index.css): warm off-white tile with
+       the green accent glyph in light, ink tile with the soft green in dark.
+
+       iOS 26: no baked lighting (shadow/sheen) — the system supplies Liquid
+       Glass and derives Dark/Clear/Tinted home-screen variants from the light
+       art. The dark layer below is for browser favicons: Chromium/Firefox
+       apply the media query themselves; Safari gets the forced-dark
+       icon-dark.svg swapped in by useTheme.ts. Rasterizers ignore @media, so
+       scripts/generate-icons.mjs forces a variant by swapping this style block. -->
+  <style>
+    .ic-dark { display: none; }
+    @media (prefers-color-scheme: dark) {
+      .ic-light { display: none; }
+      .ic-dark { display: inline; }
+    }
+  </style>
+  <defs>
+    <linearGradient id="tileLight" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#fdfcfa"/>
+      <stop offset="1" stop-color="#f5f3ee"/>
+    </linearGradient>
+    <linearGradient id="tileDark" x1="256" y1="0" x2="256" y2="512" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#17191f"/>
+      <stop offset="1" stop-color="#101218"/>
+    </linearGradient>
+  </defs>
+
+  <g class="ic-light">
+    <rect width="512" height="512" fill="url(#tileLight)"/>
+    <g fill="none" stroke="#1fb586" stroke-linecap="round" stroke-width="44">
+      <path d="M72 338 q 92 -64 184 0 t 184 0"/>
+      <path d="M72 256 q 92 -64 184 0 t 184 0" opacity="0.6"/>
+      <path d="M72 174 q 92 -64 184 0 t 184 0" opacity="0.32"/>
+    </g>
+  </g>
+
+  <g class="ic-dark">
+    <rect width="512" height="512" fill="url(#tileDark)"/>
+    <g fill="none" stroke="#62d0a4" stroke-linecap="round" stroke-width="44">
+      <path d="M72 338 q 92 -64 184 0 t 184 0"/>
+      <path d="M72 256 q 92 -64 184 0 t 184 0" opacity="0.6"/>
+      <path d="M72 174 q 92 -64 184 0 t 184 0" opacity="0.32"/>
+    </g>
+  </g>
+</svg>

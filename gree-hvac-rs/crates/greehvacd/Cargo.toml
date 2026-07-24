@@ -1,0 +1,23 @@
+[package]
+name = "greehvacd"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "HTTP + SSE daemon exposing a Gree HVAC device to a web UI"
+
+[dependencies]
+greehvac = { path = "../greehvac" }
+tokio = { version = "1", features = ["rt", "macros", "sync", "net", "signal", "time"] }
+axum = "0.7"
+tower-http = { version = "0.5", features = ["cors", "fs"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+dotenvy = "0.15"
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"
+log = "0.4"
+env_logger = "0.11"
+clap = { version = "~4.4", features = ["derive", "env"] }
+
+[dev-dependencies]
+tower = { version = "0.4", features = ["util"] }

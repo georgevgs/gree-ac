@@ -1,0 +1,23 @@
+[Unit]
+Description=Gree HVAC daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=/usr/local/bin/greehvacd
+# The AC's IP on the vacation-home FRITZ!Box (give it a static DHCP lease in
+# the FRITZ!Box UI: Home Network > the device > "always assign same address").
+Environment=AC_HOST=192.168.178.71
+Environment=PORT=8481
+Environment=RUST_LOG=info
+# Uncomment to serve the built PWA from the daemon too (one URL, no web server):
+# Environment=PUBLIC_DIR=/srv/toyotomi-ac/pwa
+# Uncomment to require a bearer token and pin the UI origin:
+# Environment=API_TOKEN=change-me
+# Environment=CORS_ORIGIN=http://raspberrypi.local:5173
+Restart=always
+RestartSec=5
+DynamicUser=yes
+
+[Install]
+WantedBy=multi-user.target

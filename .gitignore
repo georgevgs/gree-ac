@@ -1,0 +1,17 @@
+node_modules/
+dist/
+build/
+gree-hvac-rs/target/
+
+# secrets / local config
+.env
+.env.local
+pwa/.env
+
+# logs & os cruft
+*.log
+.DS_Store
+
+# generated PNG icons (regenerate with: cd pwa && npm run icons)
+pwa/public/icon-*.png
+pwa/public/apple-touch-icon*.png

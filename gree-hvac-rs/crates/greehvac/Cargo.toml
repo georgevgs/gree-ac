@@ -1,0 +1,17 @@
+[package]
+name = "greehvac"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+description = "Rust client for Gree-protocol HVAC devices (EWPE Smart / Toyotomi / rebrands)"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+aes = "0.8"
+ecb = "0.1"
+aes-gcm = "0.10"
+cipher = { version = "0.4", features = ["block-padding", "alloc"] }
+base64 = "0.22"
+log = "0.4"
+thiserror = "1"

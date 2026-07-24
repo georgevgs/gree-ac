@@ -1,0 +1,25 @@
+gree-hvac-rs
+Copyright (C) 2026
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License as published by the Free Software
+Foundation, version 3 of the License ("GPL-3.0-only").
+
+This program is distributed in the hope that it will be useful, but WITHOUT ANY
+WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A
+PARTICULAR PURPOSE. See the GNU General Public License for more details.
+
+The full license text is available at:
+  https://www.gnu.org/licenses/gpl-3.0.txt
+If you redistribute this software you must include a complete copy of that text
+in a file named LICENSE (or COPYING).
+
+-------------------------------------------------------------------------------
+Attribution
+
+This is a Rust port of "gree-hvac-client" by Denis Ilmatdinov (inwaar), which is
+licensed under GPL-3.0:
+  https://github.com/inwaar/gree-hvac-client
+
+The Gree protocol was reverse-engineered by tomikaa87; the original JS project
+also credits oroce and arthurkrupa for inspiration.

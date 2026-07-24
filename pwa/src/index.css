@@ -1,0 +1,157 @@
+@import "tailwindcss";
+@import "@fontsource-variable/plus-jakarta-sans";
+@import "@fontsource/space-mono/400.css";
+@import "@fontsource/space-mono/700.css";
+
+/* ─────────────────────────────────────────────────────────────────────────
+   Umi — "AC controller design system" (claude.ai/design, ACControllerApp).
+   Warm-neutral surfaces, one green brand accent, literal temperature colors
+   (blue = cool, orange = warm), Plus Jakarta Sans + Space Mono micro-labels,
+   soft diffuse shadows, big friendly radii.
+   ───────────────────────────────────────────────────────────────────────── */
+
+/* Every token is written once with light-dark(). By default the scheme follows
+   the phone (`light dark`); picking Light or Dark in Settings sets data-theme
+   on <html>, which pins color-scheme and flips every token at once. */
+:root {
+  color-scheme: light dark;
+
+  /* --- Surfaces --- */
+  --bg: light-dark(oklch(0.985 0.004 80), oklch(0.17 0.008 265));
+  --surface: light-dark(oklch(1 0 0), oklch(0.23 0.011 265));
+  --surface-2: light-dark(oklch(0.972 0.005 80), oklch(0.27 0.012 265));
+  --surface-sunken: light-dark(oklch(0.955 0.006 80), oklch(0.19 0.009 265));
+
+  /* --- Text --- */
+  --text: light-dark(oklch(0.22 0.01 60), oklch(0.96 0.005 90));
+  --text-muted: light-dark(oklch(0.5 0.01 70), oklch(0.72 0.01 250));
+  --text-subtle: light-dark(oklch(0.6 0.009 75), oklch(0.58 0.012 255));
+
+  /* --- Lines --- */
+  --border: light-dark(oklch(0.918 0.007 80), oklch(0.32 0.012 265));
+  --border-strong: light-dark(oklch(0.865 0.008 80), oklch(0.4 0.014 265));
+  /* Cards carry a visible hairline in both schemes so sections read as
+     distinct blocks, not shadow-only washes. */
+  --card-border: var(--border);
+
+  /* --- Brand accent (green) --- */
+  --accent: light-dark(oklch(0.7 0.14 165), oklch(0.78 0.12 165));
+  --accent-hover: light-dark(oklch(0.62 0.13 165), oklch(0.7 0.14 165));
+  --accent-soft: light-dark(oklch(0.95 0.04 165), oklch(0.3 0.05 165));
+  --on-accent: light-dark(oklch(1 0 0), oklch(0.15 0.02 165));
+
+  /* --- Status --- */
+  --warning-500: oklch(0.8 0.14 85);
+  --danger-500: light-dark(oklch(0.62 0.18 25), oklch(0.7 0.17 25));
+  --green-600: light-dark(oklch(0.62 0.13 165), oklch(0.78 0.12 165));
+
+  /* Off-state switch track / neutral fills. */
+  --track-off: light-dark(oklch(0.865 0.008 80), oklch(0.31 0.013 265));
+  --thumb: #ffffff;
+
+  /* --- Liquid glass (floating tab bar) --- */
+  --glass: light-dark(oklch(0.99 0.003 80 / 0.62), oklch(0.26 0.012 265 / 0.58));
+  --glass-edge: light-dark(oklch(1 0 0 / 0.7), oklch(0.96 0.01 265 / 0.12));
+  --glass-active: light-dark(oklch(1 0 0 / 0.95), oklch(0.38 0.014 265 / 0.85));
+
+  /* --- Shadows: soft, warm-tinted, diffuse --- */
+  --shadow-xs: 0 1px 2px light-dark(oklch(0.5 0.02 70 / 0.06), oklch(0 0 0 / 0.3));
+  --shadow-sm: light-dark(
+    0 2px 8px oklch(0.5 0.02 70 / 0.06),
+    0 2px 8px oklch(0 0 0 / 0.35)
+  ), 0 1px 2px light-dark(oklch(0.5 0.02 70 / 0.05), oklch(0 0 0 / 0.25));
+  --shadow-card: light-dark(
+    0 6px 20px oklch(0.5 0.02 70 / 0.07),
+    0 8px 24px oklch(0 0 0 / 0.45)
+  ), 0 1px 3px light-dark(oklch(0.5 0.02 70 / 0.05), oklch(0 0 0 / 0.3));
+  --shadow-pop: light-dark(0 20px 56px oklch(0.5 0.02 70 / 0.16), 0 22px 60px oklch(0 0 0 / 0.6));
+  --shadow-inset: inset 0 1px 3px light-dark(oklch(0.4 0.02 70 / 0.1), oklch(0 0 0 / 0.4));
+  --glow-accent: 0 8px 28px oklch(0.7 0.14 165 / 0.35);
+
+  /* --- Radii --- */
+  --r-sm: 12px;
+  --r-md: 18px;
+  --r-lg: 24px;
+  --r-pill: 999px;
+
+  /* --- Motion --- */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --dur-fast: 140ms;
+  --dur-base: 220ms;
+}
+
+:root[data-theme='light'] {
+  color-scheme: light;
+}
+:root[data-theme='dark'] {
+  color-scheme: dark;
+}
+
+/* Map the CSS variables onto Tailwind color utilities (bg-card, text-t2, …).
+   `inline` keeps them as var() references so the dark-mode overrides win. */
+@theme inline {
+  --color-bg: var(--bg);
+  --color-card: var(--surface);
+  --color-surface2: var(--surface-2);
+  --color-fill: var(--surface-sunken);
+  --color-text: var(--text);
+  --color-t2: var(--text-muted);
+  --color-t3: var(--text-subtle);
+  --color-line: var(--border);
+  --color-accent: var(--accent);
+
+  --font-sans: "Plus Jakarta Sans Variable", "Plus Jakarta Sans", ui-sans-serif, system-ui,
+    -apple-system, "Segoe UI", sans-serif;
+  --font-mono: "Space Mono", ui-monospace, "SF Mono", Menlo, monospace;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-sans);
+  -webkit-tap-highlight-color: transparent;
+  overscroll-behavior: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  transition: background-color 500ms ease;
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--card-border);
+  border-radius: var(--r-lg);
+  box-shadow: var(--shadow-sm);
+}
+
+/* Uppercase Space Mono micro-label — the design's section/date/kicker style. */
+.label-mono {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  font-weight: 400;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--text-subtle);
+}
+
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-feature-settings: "tnum" 1;
+}
+
+/* Keyboard focus only — never on tap/click. */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+button:focus:not(:focus-visible) {
+  outline: none;
+}
