@@ -43,7 +43,20 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
   }, [tab]);
 
   return (
-    <nav
+    <>
+      {/* Bottom scrim: scrolled content fades into the page background before
+          it reaches the bar, instead of being chopped off by the capsule with
+          stray fragments peeking around it (the standard iOS treatment).
+          Sits under the bar (z-30 vs z-40) and ignores taps. */}
+      <div
+        aria-hidden
+        className="pointer-events-none fixed inset-x-0 bottom-0 z-30"
+        style={{
+          height: 'calc(env(safe-area-inset-bottom) + 112px)',
+          background: 'linear-gradient(to top, var(--bg) 28%, transparent)',
+        }}
+      />
+      <nav
       ref={navRef}
       aria-label="Sections"
       className="fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full p-1.5"
@@ -92,5 +105,6 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
         );
       })}
     </nav>
+    </>
   );
 }
