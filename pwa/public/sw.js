@@ -2,10 +2,21 @@
 // Live AC state is NEVER cached — it always hits the network so we never show a
 // stale reading.
 
-const CACHE = 'ac-shell-v8';
+// Both placeholders are stamped by scripts/inject-sw.mjs after `vite build`:
+// the app version keys the cache, so every deploy activates a fresh cache and
+// deletes the old one instead of accreting dead hashed assets forever; the
+// built bundle files join the precache so an install works offline even when
+// the first visit fetched them before this worker controlled the page.
+const CACHE = 'ac-shell-__APP_VERSION__';
+const ASSETS = /* __PRECACHE_ASSETS__ */ [];
 // Cache matching is query-sensitive, so these must be the EXACT URLs the app
 // requests (index.html, manifest, and useTheme all use ?v=4 for the SVGs).
-const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg?v=4', '/icon-dark.svg?v=4'];
+const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg?v=4', '/icon-dark.svg?v=4', ...ASSETS];
+
+// How long a navigation may wait on the network before the cached shell takes
+// over. On the LAN, "bridge down" is an unreachable host: without a deadline
+// iOS sits on a white screen for tens of seconds before the fetch gives up.
+const NAV_TIMEOUT_MS = 2500;
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -43,9 +54,26 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigations: network-first, fall back to the cached shell when offline.
+  // Navigations: network-first with a short deadline, fall back to the cached
+  // shell. A fresh response also renews the cached shell, so the next offline
+  // launch boots the last-deployed app rather than whatever install captured.
   if (request.mode === 'navigate') {
-    event.respondWith(fetch(request).catch(() => caches.match('/index.html')));
+    event.respondWith(
+      Promise.race([
+        fetch(request),
+        new Promise((_, reject) => {
+          setTimeout(() => reject(new Error('navigation timeout')), NAV_TIMEOUT_MS);
+        }),
+      ])
+        .then((res) => {
+          if (res && res.status === 200) {
+            const copy = res.clone();
+            event.waitUntil(caches.open(CACHE).then((c) => c.put('/index.html', copy)));
+          }
+          return res;
+        })
+        .catch(() => caches.match('/index.html').then((cached) => cached || fetch(request))),
+    );
     return;
   }
 

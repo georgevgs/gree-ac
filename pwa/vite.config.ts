@@ -14,6 +14,9 @@ export default defineConfig({
     ),
   },
   build: {
+    // The CSS (light-dark(), oklch) already requires Safari 17.5+, so
+    // downleveling the JS below that is pure bundle waste.
+    target: 'es2022',
     rollupOptions: {
       output: {
         // Split the two big, rarely-changing libraries into their own chunks.

@@ -37,8 +37,6 @@ const targets = [
   [`icon-192.v${VERSION}.png`, 192],
   [`icon-512.v${VERSION}.png`, 512],
   [`apple-touch-icon.v${VERSION}.png`, 180],
-  // Conventional path iOS probes when no <link> matches — same art, stable name.
-  ['apple-touch-icon.png', 180],
 ];
 
 for (const [name, size] of targets) {
