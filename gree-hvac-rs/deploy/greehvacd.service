@@ -5,13 +5,14 @@ Wants=network-online.target
 
 [Service]
 ExecStart=/usr/local/bin/greehvacd
-# The AC's IP on the vacation-home FRITZ!Box (give it a static DHCP lease in
-# the FRITZ!Box UI: Home Network > the device > "always assign same address").
-Environment=AC_HOST=192.168.178.71
+# The AC's LAN IP. Give it a static DHCP lease in your router so it never
+# drifts (e.g. FRITZ!Box: Home Network > the device > "always assign same
+# address").
+Environment=AC_HOST=192.168.1.50
 Environment=PORT=8481
 Environment=RUST_LOG=info
 # Uncomment to serve the built PWA from the daemon too (one URL, no web server):
-# Environment=PUBLIC_DIR=/srv/toyotomi-ac/pwa
+# Environment=PUBLIC_DIR=/srv/gree-ac/pwa
 # Uncomment to require a bearer token and pin the UI origin:
 # Environment=API_TOKEN=change-me
 # Environment=CORS_ORIGIN=http://raspberrypi.local:5173

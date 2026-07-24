@@ -1,7 +1,7 @@
 services:
   ac-bridge:
     build: ./gree-hvac-rs
-    container_name: toyotomi-ac-bridge
+    container_name: gree-ac-bridge
     restart: unless-stopped
     # Host networking so GREE's UDP LAN protocol (port 7000, scan/bind/poll)
     # can reach the AC. The bridge then listens on PORT (from .env) on the host.

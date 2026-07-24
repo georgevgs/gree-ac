@@ -1,6 +1,6 @@
 import type { ACState, Unit } from '../api/types';
 import { acClient } from '../api/acClient';
-import { UNIT_OPTIONS, THEME_OPTIONS } from '../options';
+import { DEVICE_NAME, UNIT_OPTIONS, THEME_OPTIONS } from '../options';
 import type { ThemePref } from '../hooks/useTheme';
 import { Icon } from '../components/Icon';
 import { Row } from '../components/Row';
@@ -35,8 +35,8 @@ export function SettingsScreen({ state, command, theme, setTheme }: Props) {
           <Icon name="cool" size={26} />
         </span>
         <span className="min-w-0 flex-1">
-          <span className="block text-[17px] font-bold text-text">Umi</span>
-          <span className="block text-[13px] text-t2">Toyotomi wall unit</span>
+          <span className="block text-[17px] font-bold text-text">{DEVICE_NAME}</span>
+          <span className="block text-[13px] text-t2">GREE-compatible unit</span>
         </span>
         <span
           className="flex items-center gap-1.5 text-[12px] font-semibold"

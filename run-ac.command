@@ -1,6 +1,6 @@
 #!/bin/bash
 # ─────────────────────────────────────────────────────────────────────────────
-# Toyotomi AC — on-site launcher (double-click me)
+# GREE AC bridge — on-site launcher (double-click me)
 #
 # Starts the bridge on this Mac. The bridge talks to the AC over the home WiFi
 # AND serves the control app, so there's a single URL to open on your phone.
@@ -69,7 +69,7 @@ if lsof -nP -iTCP:"$PORT" -sTCP:LISTEN >/dev/null 2>&1; then
 fi
 
 echo ""
-echo "  Toyotomi AC is starting…"
+echo "  AC bridge is starting…"
 echo "  ────────────────────────────────────────────"
 echo "  On your phone (same Wi-Fi), open:"
 echo "      http://$LAN_IP:$PORT"

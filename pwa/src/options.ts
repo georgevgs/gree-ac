@@ -2,6 +2,10 @@ import type { Mode, FanSpeed, Quiet, Air, Unit, ToggleField } from './api/types'
 import type { IconName } from './components/Icon';
 import type { ThemePref } from './hooks/useTheme';
 
+/** What the app calls the unit ("Umi", "Living room"…). Build-time via
+ *  VITE_DEVICE_NAME in pwa/.env; the generic default suits any GREE-based AC. */
+export const DEVICE_NAME = import.meta.env.VITE_DEVICE_NAME || 'AC';
+
 // Display definitions for every control. Values mirror the bridge's allow-lists
 // (fixed by the gree-hvac-client version); labels are what the user sees.
 

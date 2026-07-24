@@ -2,7 +2,9 @@ import { useEffect, useState } from 'react';
 
 export type ThemePref = 'auto' | 'light' | 'dark';
 
-const KEY = 'umi-theme';
+const KEY = 'ac-theme';
+// Pre-rename key (the app used to be Umi-branded); migrated on first read.
+const LEGACY_KEY = 'umi-theme';
 const BG = { light: '#fbfaf7', dark: '#0e0f13' };
 const ICON = { light: '/icon.svg?v=4', dark: '/icon-dark.svg?v=4' };
 
@@ -12,11 +14,15 @@ const ICON = { light: '/icon.svg?v=4', dark: '/icon-dark.svg?v=4' };
  *  pre-applied before first paint by the inline script in index.html. */
 export function useTheme() {
   const [theme, setTheme] = useState<ThemePref>(() => {
-    const stored = localStorage.getItem(KEY);
-    return stored === 'light' || stored === 'dark' ? stored : 'auto';
+    const stored = localStorage.getItem(KEY) ?? localStorage.getItem(LEGACY_KEY);
+    if (stored === 'light' || stored === 'dark') {
+      return stored;
+    }
+    return 'auto';
   });
 
   useEffect(() => {
+    localStorage.removeItem(LEGACY_KEY); // one-time migration; idempotent
     const root = document.documentElement;
     if (theme === 'auto') {
       delete root.dataset.theme;

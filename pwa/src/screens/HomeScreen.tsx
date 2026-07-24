@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, m, useReducedMotion } from 'framer-motion';
 import { acClient } from '../api/acClient';
 import type { ACState, Mode, Quiet } from '../api/types';
-import { MODE_OPTIONS, FAN_OPTIONS, QUIET_OPTIONS } from '../options';
+import { DEVICE_NAME, MODE_OPTIONS, FAN_OPTIONS, QUIET_OPTIONS } from '../options';
 import { HELP, type HelpEntry } from '../help';
 import { Dial } from '../components/Dial';
 import { PowerToggle } from '../components/PowerToggle';
@@ -113,7 +113,9 @@ export function HomeScreen({ state, error, command }: Props) {
       <m.header variants={item} className="flex items-start justify-between px-0.5">
         <div className="flex flex-col gap-[3px]">
           <span className="label-mono">{todayLabel()}</span>
-          <h1 className="mt-[3px] text-[27px] font-extrabold tracking-[-0.02em] text-text">Umi</h1>
+          <h1 className="mt-[3px] text-[27px] font-extrabold tracking-[-0.02em] text-text">
+            {DEVICE_NAME}
+          </h1>
           <p className="flex items-center gap-1.5 text-[13px] text-t2">
             <StatusDot connecting={connecting} error={!!error} offline={offline} power={power} />
             {subtitle}

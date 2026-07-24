@@ -1,7 +1,7 @@
 {
-  "name": "Umi AC Control",
-  "short_name": "Umi AC",
-  "description": "Local control for the Toyotomi Umi air conditioner",
+  "name": "AC Control",
+  "short_name": "AC Control",
+  "description": "Local control for GREE-compatible air conditioners",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",

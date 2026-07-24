@@ -3,14 +3,14 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <title>Umi AC</title>
+    <title>AC Control</title>
     <meta name="theme-color" content="#fbfaf7" media="(prefers-color-scheme: light)" />
     <meta name="theme-color" content="#0e0f13" media="(prefers-color-scheme: dark)" />
     <!-- Apply a saved Light/Dark override before first paint so the app never
          flashes in the system scheme. Kept in sync by src/hooks/useTheme.ts. -->
     <script>
       try {
-        var t = localStorage.getItem('umi-theme');
+        var t = localStorage.getItem('ac-theme') || localStorage.getItem('umi-theme');
         if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t;
       } catch (e) {}
     </script>
@@ -19,7 +19,7 @@
     <!-- iOS ignores manifest icons for the Home Screen; these link tags are required. -->
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
-    <meta name="apple-mobile-web-app-title" content="Umi AC" />
+    <meta name="apple-mobile-web-app-title" content="AC Control" />
     <link rel="apple-touch-icon" sizes="180x180" href="/apple-touch-icon.v5.png" />
     <link rel="icon" type="image/svg+xml" href="/icon.svg?v=4" />
   </head>

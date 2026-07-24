@@ -1,15 +1,20 @@
-# Toyotomi Umi AC Control
+# GREE AC Control
 
-A self-hosted replacement for the broken official "Toyotomi Home" app. A React
-PWA talks to a small Rust bridge on the LAN, which speaks the **GREE local
-protocol** directly to the AC. No cloud, no vendor app.
+Self-hosted local control for **GREE-based air conditioners** — no cloud, no
+vendor app. A React PWA talks to a small Rust bridge on the LAN, which speaks
+the **GREE local protocol** (Ewpe Smart, UDP port 7000) directly to the AC.
 
-> **Protocol note — this is a GREE unit, not Tuya.** The Toyotomi Umi UTN/UTG-12CH
-> pairs with the **Ewpe Smart** app, which uses GREE's local UDP protocol
-> (port 7000), *not* Tuya. So the bridge implements that protocol directly, not
-> `tuyapi`. This unit's WiFi module firmware is **v1.45**, which uses **AES-GCM**
-> encryption (the ECB→GCM threshold is ~firmware v1.21); the bridge tries ECB
-> first and falls back to GCM automatically, so this is handled for you.
+**Works with any unit that pairs with the Ewpe Smart / GREE+ app**, which
+includes hardware sold under many brands: GREE, Tosot, Cooper & Hunter,
+Sinclair, Inventor, Argo, Daitsu, **Toyotomi**, and other rebrands. The
+reference unit this project was built and probed against is a Toyotomi Umi
+UTN/UTG-12CH; unit-specific findings below are labeled as such.
+
+> **Protocol note — GREE, not Tuya.** If your unit pairs with Ewpe Smart or
+> GREE+, it speaks GREE's local UDP protocol and this project applies. If it
+> pairs only with a Tuya-based app, it does not. Firmware ≳ v1.21 uses
+> **AES-GCM** encryption, older firmware AES-ECB; the bridge tries ECB first
+> and falls back to GCM automatically, so both are handled for you.
 
 ## Architecture
 
@@ -31,7 +36,7 @@ PWA (React + TS, "Add to Home Screen")
   uses — Tailscale or Cloudflare Tunnel.
 
 ```
-toyotomi-ac/
+.
 ├── gree-hvac-rs/    Rust workspace: protocol crate + bridge daemon + probe
 ├── pwa/             React + Vite + Tailwind PWA
 ├── .env             bridge config (AC_HOST, PORT, PUBLIC_DIR, …)
@@ -55,12 +60,11 @@ schema to extract. You only need the unit's LAN IP.
 3. **Set a DHCP reservation** for that IP in your router so it never drifts.
 4. That's it — the bridge derives the device key automatically on first connect.
 
-Known device (fill in yours):
+Reference unit (fill in yours):
 
 | Field | Value |
 |-------|-------|
-| Model | Toyotomi Umi UTN/UTG-12CH (12000 BTU, A+++/A+++) |
-| MAC | `58:0d:0d:3c:a2:d4` |
+| Model | Toyotomi Umi UTN/UTG-12CH (12000 BTU, A+++/A+++) — a GREE rebrand |
 | WiFi firmware | v1.45 (→ AES-GCM) |
 | LAN IP | _set a DHCP reservation, then put it in `.env` as `AC_HOST`_ |
 
@@ -233,9 +237,27 @@ live protocol (press-a-button-and-watch-what-flips):
   **can't be read over WiFi** (see "No consumption data" above). Accurate metering needs
   external hardware (Shelly EM/PM).
 
-> **Security:** the API has **no auth** — it assumes a trusted LAN / Tailscale
-> network. Do not expose it directly to the internet. Revisit if you ever put
-> it behind a public tunnel without an auth layer.
+### Security model
+
+The default posture is **trusted-LAN**: no auth, CORS open. That is fine for a
+private home Wi-Fi and nothing else. Concretely:
+
+- **Never port-forward the bridge to the internet.** For remote access use
+  Tailscale or Cloudflare Tunnel (with access control) instead.
+- **Set `API_TOKEN`** whenever anyone untrusted can join the network, or when
+  the bridge is reachable over a tunnel. Every `/api` request then needs
+  `Authorization: Bearer <token>` (or `?token=` for `EventSource`, which cannot
+  send headers — note query tokens can land in access logs). The comparison is
+  constant-time. 401s use the same `{"error": …}` envelope as other failures.
+- **Open CORS + no token means LAN drive-by is possible**: any website open on
+  a device inside your network could script the API. Browsers increasingly
+  block public→private requests (Private Network Access), but don't rely on
+  it — a token closes this properly, and `CORS_ORIGIN` can pin the UI origin.
+- The daemon logs a startup warning whenever `/api` runs without auth.
+- Nothing in this repo contains device secrets: the GREE "generic" AES keys in
+  the crypto layer are protocol constants (public knowledge, required by every
+  client implementation), and the per-device key is derived at bind time and
+  held only in memory.
 
 ---
 
@@ -250,6 +272,9 @@ npm run dev                  # http://localhost:5173 (also on your LAN IP)
 
 - `VITE_BRIDGE_URL` — the bridge's LAN IP or Tailscale hostname. Leave **empty**
   if the bridge serves the PWA (same origin).
+- `VITE_DEVICE_NAME` — what the app calls the unit (the big name in the header
+  and the device card in Settings), e.g. `Umi` or `Living room`. Unset = the
+  generic "AC".
 - State arrives over SSE (`/api/events`) as it changes, so the UI reflects the
   physical remote within milliseconds. Polling `/api/state` stays on as a
   fallback — every 15s while the stream is healthy, every 2s when it isn't.
@@ -304,9 +329,9 @@ Unraid/Pi path in Phase 3b.
 
 1. Install [Rust](https://rustup.rs) once (`curl --proto '=https' --tlsv1.2 -sSf
    https://sh.rustup.rs | sh`). The launcher builds the bridge on first run.
-2. Reserve the AC's IP in the FRITZ!Box (*Heimnetz → Netzwerk →* the AC device *→*
-   edit *→ "always assign this network device the same IPv4 address"*), and put
-   that IP in the repo-root `.env` as `AC_HOST`.
+2. Reserve the AC's IP in your router (e.g. FRITZ!Box: *Heimnetz → Netzwerk →*
+   the AC device *→* edit *→ "always assign this network device the same IPv4
+   address"*), and put that IP in the repo-root `.env` as `AC_HOST`.
 3. Build the app so the bridge can serve it, and point `PUBLIC_DIR` at it:
    ```bash
    cd pwa && npm run build     # VITE_BRIDGE_URL must be EMPTY (= same origin)
@@ -315,9 +340,9 @@ Unraid/Pi path in Phase 3b.
    itself — one URL, no separate web host.
 
 **Every time — double-click `run-ac.command`** in the project root. It starts the
-bridge and prints a URL like `http://192.168.178.x:8481`. On your **phone** (same
-Wi-Fi) open that URL → *Share → Add to Home Screen*. Keep the Terminal window
-open; close it to stop.
+bridge and prints a URL like `http://<this-macs-lan-ip>:8481`. On your **phone**
+(same Wi-Fi) open that URL → *Share → Add to Home Screen*. Keep the Terminal
+window open; close it to stop.
 
 The first launch compiles the bridge (a few minutes) and builds the PWA; every
 launch after that is instant.
@@ -348,11 +373,6 @@ docker compose up -d --build       # builds a static musl binary into bare Alpin
   beyond a trusted LAN.
 
 ---
-
-## Open questions to confirm on the box
-
-1. Reverse-proxy / compose convention already in use to match?
-2. Tailscale or Cloudflare Tunnel already active for other services?
 
 ## Out of scope (v1)
 

@@ -415,6 +415,17 @@ impl IntoResponse for ApiError {
     }
 }
 
+/// Compare a presented token against the secret without an early exit, so the
+/// comparison time doesn't leak how many leading bytes matched.
+fn constant_time_eq(presented: &str, secret: &str) -> bool {
+    let a = presented.as_bytes();
+    let b = secret.as_bytes();
+    if a.len() != b.len() {
+        return false;
+    }
+    a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
+}
+
 async fn api_not_found() -> ApiError {
     ApiError(StatusCode::NOT_FOUND, "unknown API route".to_string())
 }
@@ -449,7 +460,7 @@ async fn auth(
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
-        .map(|value| value == secret)
+        .map(|value| constant_time_eq(value, secret))
         .unwrap_or(false);
 
     // NOTE: query-param tokens can end up in access logs. Prefer the header
@@ -460,7 +471,7 @@ async fn auth(
         .into_iter()
         .flat_map(|q| q.split('&'))
         .filter_map(|pair| pair.strip_prefix("token="))
-        .any(|value| value == secret);
+        .any(|value| constant_time_eq(value, secret));
 
     if header_ok || query_ok {
         return Ok(next.run(request).await);

@@ -2,7 +2,7 @@
 // Live AC state is NEVER cached — it always hits the network so we never show a
 // stale reading.
 
-const CACHE = 'umi-ac-shell-v7';
+const CACHE = 'ac-shell-v8';
 // Cache matching is query-sensitive, so these must be the EXACT URLs the app
 // requests (index.html, manifest, and useTheme all use ?v=4 for the SVGs).
 const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg?v=4', '/icon-dark.svg?v=4'];
