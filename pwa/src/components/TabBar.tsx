@@ -82,13 +82,15 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
     <m.nav
       ref={navRef}
       aria-label="Sections"
-      className="fixed left-1/2 z-40 flex -translate-x-1/2 items-center gap-1 rounded-full p-1.5"
+      className="fixed left-1/2 z-40 flex items-center gap-1 rounded-full p-1.5"
       initial={false}
       animate={{ y: hidden ? HIDE_Y : 0 }}
       transition={reduce ? { duration: 0 } : { type: 'spring', stiffness: 420, damping: 40 }}
       style={{
         bottom: 'calc(env(safe-area-inset-bottom) + 14px)',
-        // framer drives y; keep the horizontal centering out of its transform.
+        // Centering lives here, not in a Tailwind translate utility: framer
+        // writes `transform` while Tailwind v4 writes the separate `translate`
+        // property, and applying both shifted the bar half offscreen.
         x: '-50%',
         background: 'var(--glass)',
         WebkitBackdropFilter: 'blur(20px) saturate(1.8)',
