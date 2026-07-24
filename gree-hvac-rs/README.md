@@ -156,42 +156,56 @@ sets to tell "unsupported" apart from "truncated".
 
 ## Cross-compile for the Pi Zero W
 
-The Zero W is **ARMv6** + VFPv2. Do **not** use an `armv7`/`armhf` target;
-the binary will `SIGILL` on the first NEON/ARMv7 instruction. Correct triple:
-`arm-unknown-linux-gnueabihf`.
+The Zero W is **ARMv6** + VFPv2. Do **not** use an `armv7`/`armhf` target; the
+binary will `SIGILL` on the first NEON/ARMv7 instruction. The target is
+`arm-unknown-linux-musleabihf`: ARMv6, and statically linked, so the binary
+carries no glibc-version coupling to whatever Pi OS release is on the card.
 
-Build on a real machine (not on the Pi, where native compiles are painfully
-slow) with [`cross`](https://github.com/cross-rs/cross), which handles the
-ARMv6 toolchain in Docker:
+Never build on the Pi. One 1 GHz core and 512 MB RAM against the tokio + axum
+dependency tree means hours, and likely an OOM.
 
-```sh
-cargo install cross
-cross build --release -p greehvacd --target arm-unknown-linux-gnueabihf
-scp target/arm-unknown-linux-gnueabihf/release/greehvacd pi@raspberrypi:/usr/local/bin/
-```
+`../deploy-pi.command` does all of this — build, verify, ship, restart,
+health-check. Use it rather than the raw commands below; it asserts the output
+ELF is ARM and statically linked before shipping, because the failure mode of a
+wrong target is a bare `Illegal instruction` on the Pi with no other clue.
 
-RustCrypto is pure Rust, so there's no OpenSSL to cross-link. That is the main
-reason to avoid the C-binding route here.
-
-To remove even the glibc-version coupling to whatever Pi OS release is on the
-card, build the musl variant instead; the binary is fully static and runs on
-any ARMv6 Linux:
+By hand, on Apple Silicon:
 
 ```sh
-cross build --release -p greehvacd --target arm-unknown-linux-musleabihf
+brew tap messense/macos-cross-toolchains
+brew install arm-unknown-linux-musleabihf         # native arm64, no Docker
+rustup target add arm-unknown-linux-musleabihf
+
+CARGO_TARGET_ARM_UNKNOWN_LINUX_MUSLEABIHF_LINKER=arm-unknown-linux-musleabihf-gcc \
+  cargo build --release -p greehvacd --target arm-unknown-linux-musleabihf
+
+file target/arm-unknown-linux-musleabihf/release/greehvacd
+# want: ELF 32-bit LSB executable, ARM, EABI5 ... statically linked
 ```
+
+[`cross`](https://github.com/cross-rs/cross) also works and needs no brew tap,
+but its ARMv6 image is amd64-only, so on Apple Silicon it builds under QEMU
+emulation — correct output, considerably slower, and Docker must be running.
+
+RustCrypto is pure Rust, so there is no OpenSSL to cross-link. That is the main
+reason this stays a one-command build instead of a toolchain project.
 
 Give the AC a static DHCP lease and pass it via `--host`; unicast is more
 reliable than the `.255` broadcast default once you know the address.
 
 ## systemd
 
-Copy `deploy/greehvacd.service` to `/etc/systemd/system/`, edit `AC_HOST`,
-then:
+`../deploy-pi.command` installs and restarts the unit for you. By hand: copy
+`deploy/greehvacd.service` to `/etc/systemd/system/`, edit `AC_HOST`, then:
 
 ```sh
 sudo systemctl enable --now greehvacd
 ```
+
+`deploy/setup-pi.sh` is the one-time host tuning that belongs alongside it —
+most importantly disabling Wi-Fi power save, without which the radio parks
+between beacons and silently drops the AC's UDP replies. Read the comments
+before editing it: it deliberately does **not** touch sshd.
 
 ## Docker
 

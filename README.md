@@ -101,8 +101,10 @@ reference one before you point it at hardware.
   sleep, and prints the URL for your phone. Close the window to stop.
 - **Docker on anything always-on**: `docker compose up -d --build` (host
   networking, so GREE's UDP traffic works reliably).
-- **systemd on a Pi**: cross-compile (see the bridge README) and use
-  `gree-hvac-rs/deploy/greehvacd.service`.
+- **systemd on a Raspberry Pi Zero W** (what the reference setup runs):
+  `./deploy-pi.command` from the repo root. It cross-compiles a static ARMv6
+  binary, builds the PWA, ships both, and restarts the unit. First-time setup
+  and every diagnostic live in [docs/pi-runbook.md](docs/pi-runbook.md).
 
 For remote access reuse whatever the host already has (Tailscale, Cloudflare
 Tunnel). Don't introduce a second mechanism, and don't port-forward.

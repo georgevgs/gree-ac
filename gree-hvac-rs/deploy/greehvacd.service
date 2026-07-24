@@ -1,24 +1,56 @@
 [Unit]
-Description=Gree HVAC daemon
+Description=Gree HVAC bridge (greehvacd)
+Documentation=https://github.com/gvagdas/gree-ac
 After=network-online.target
 Wants=network-online.target
 
 [Service]
 ExecStart=/usr/local/bin/greehvacd
-# The AC's LAN IP. Give it a static DHCP lease in your router so it never
-# drifts (e.g. FRITZ!Box: Home Network > the device > "always assign same
-# address").
-Environment=AC_HOST=192.168.1.50
+
+# --- configuration -----------------------------------------------------
+# The AC's LAN IP. Unicast beats the .255 broadcast default, so give the AC
+# a static DHCP lease (FRITZ!Box: Home Network > the device > "always assign
+# same address") and keep this in sync.
+Environment=AC_HOST=192.168.178.71
 Environment=PORT=8481
+Environment=BIND_ADDR=0.0.0.0
 Environment=RUST_LOG=info
-# Uncomment to serve the built PWA from the daemon too (one URL, no web server):
-# Environment=PUBLIC_DIR=/srv/gree-ac/pwa
-# Uncomment to require a bearer token and pin the UI origin:
+# The bridge serves the built PWA itself: one process, one URL, no web server.
+Environment=PUBLIC_DIR=/srv/gree-ac/pwa
+# Uncomment to require a bearer token on /api (generate: openssl rand -hex 32).
+# The PWA sends it from its Settings screen.
 # Environment=API_TOKEN=change-me
-# Environment=CORS_ORIGIN=http://raspberrypi.local:5173
+
+# --- lifecycle ---------------------------------------------------------
 Restart=always
 RestartSec=5
+# The AC or the Wi-Fi can be down for a long time at boot; never give up.
+StartLimitIntervalSec=0
+
+# --- sandboxing --------------------------------------------------------
+# The daemon writes nothing: ephemeral UDP out to port 7000, TCP 8481 in,
+# and a read-only directory of static files.
 DynamicUser=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+NoNewPrivileges=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+
+# --- Pi Zero W sizing --------------------------------------------------
+# 512 MB total. The daemon idles well under 10 MB; this is a runaway guard,
+# not a target. If it ever trips, something is wrong and a restart is right.
+MemoryMax=96M
+# Single 1 GHz ARMv6 core: keep the daemon off the scheduler's neck so ssh
+# stays responsive if it ever does spin.
+Nice=5
 
 [Install]
 WantedBy=multi-user.target
