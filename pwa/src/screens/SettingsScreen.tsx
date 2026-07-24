@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import type { ACState, Unit } from '../api/types';
-import { acClient } from '../api/acClient';
+import { acClient, readToken, writeToken } from '../api/acClient';
 import { DEVICE_NAME, UNIT_OPTIONS, THEME_OPTIONS } from '../options';
 import type { ThemePref } from '../hooks/useTheme';
 import { Icon } from '../components/Icon';
@@ -65,15 +66,17 @@ export function SettingsScreen({ state, command, theme, setTheme }: Props) {
             />
           }
         />
+        {/* Switches what the AC's own panel shows — the app always works in °C,
+            since that's what the bridge reports. */}
         <Row
           icon="thermo"
-          label="Unit"
+          label="Panel display"
           right={
             <Segmented<Unit>
               items={UNIT_OPTIONS}
               value={state?.unit ?? null}
               disabled={disabled}
-              label="Temperature unit"
+              label="Temperature unit shown on the AC unit"
               onChange={(u) => command(() => acClient.setOption('unit', u))}
             />
           }
@@ -83,8 +86,32 @@ export function SettingsScreen({ state, command, theme, setTheme }: Props) {
       <div className="label-mono mb-2.5 px-0.5">System</div>
       <div className="card overflow-hidden">
         <Row icon="wifi" label="Bridge" divider right={window.location.host || '—'} />
+        <Row icon="key" label="Token" divider right={<TokenField />} />
         <Row icon="info" label="Version" right={`v${__APP_VERSION__} · ${__BUILD_DATE__}`} />
       </div>
     </div>
+  );
+}
+
+/** Masked entry for the bridge's optional access token — only needed when the
+ *  bridge was started with one. Saved as typed; leaving it empty clears it. */
+function TokenField() {
+  const [token, setToken] = useState(() => readToken());
+  return (
+    <input
+      type="password"
+      autoComplete="off"
+      autoCapitalize="none"
+      spellCheck={false}
+      placeholder="None"
+      aria-label="Bridge token"
+      value={token}
+      onChange={(e) => {
+        setToken(e.target.value);
+        writeToken(e.target.value);
+      }}
+      onBlur={() => setToken((v) => v.trim())}
+      className="w-[140px] border-none bg-transparent text-right text-[14px] text-t2 placeholder:text-t3"
+    />
   );
 }

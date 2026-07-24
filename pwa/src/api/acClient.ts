@@ -1,8 +1,54 @@
 import type { ACState, Mode, FanSpeed, Quiet, Air, Unit } from './types';
+import { AIRFLOW_VERT_ZONES, AIRFLOW_HOR_ZONES, TEMP_MIN, TEMP_MAX, type AirflowZone } from '../options';
 
 // Empty VITE_BRIDGE_URL => same origin (bridge serves the PWA). Otherwise the
 // Tailscale hostname or LAN IP of the bridge, e.g. http://192.168.1.50:8481
 const BASE = (import.meta.env.VITE_BRIDGE_URL ?? '').replace(/\/$/, '') + '/api';
+
+/** Why a request failed, at the granularity the UI acts on: `network` and
+ *  `timeout` mean the bridge itself is unreachable, `ac-offline` means the
+ *  bridge answered but the unit is away (503), `rejected` is a validation 400,
+ *  `auth` a 401 (token needed — see Settings), `server` everything else. */
+export type AcErrorKind = 'network' | 'timeout' | 'ac-offline' | 'rejected' | 'auth' | 'server';
+
+export class AcError extends Error {
+  constructor(
+    readonly kind: AcErrorKind,
+    message: string,
+  ) {
+    super(message);
+    this.name = 'AcError';
+  }
+}
+
+/** Everything this module throws is an AcError; this narrows the rest. */
+export function toAcError(e: unknown): AcError {
+  if (e instanceof AcError) {
+    return e;
+  }
+  if (e instanceof Error) {
+    return new AcError('server', e.message);
+  }
+  return new AcError('server', 'Request failed');
+}
+
+// Optional bridge auth. The token lives in localStorage (set in Settings);
+// fetches carry it as a Bearer header, the SSE URL as ?token= because
+// EventSource cannot send headers.
+const TOKEN_KEY = 'bridgeToken';
+
+export function readToken(): string {
+  return localStorage.getItem(TOKEN_KEY) ?? '';
+}
+
+export function writeToken(token: string): void {
+  const trimmed = token.trim();
+  if (trimmed === '') {
+    localStorage.removeItem(TOKEN_KEY);
+  } else {
+    localStorage.setItem(TOKEN_KEY, trimmed);
+  }
+}
 
 // Allow-lists for every server enum. A value outside them (a newer bridge, a
 // firmware quirk) collapses to null at the boundary and renders as "—",
@@ -12,6 +58,14 @@ const FAN_SPEEDS: readonly FanSpeed[] = ['auto', 'low', 'mediumLow', 'medium', '
 const QUIET_LEVELS: readonly Quiet[] = ['off', 'mode1', 'mode2', 'mode3'];
 const AIR_MODES: readonly Air[] = ['off', 'inside', 'outside', 'mode3'];
 const UNITS: readonly Unit[] = ['celsius', 'fahrenheit'];
+
+// Swing values the AirflowPicker understands: the axis-wide 'default' (off)
+// and 'full' plus each zone's fixed and (vertical only) swing position.
+function swingValues(zones: readonly AirflowZone[]): readonly string[] {
+  return ['default', 'full', ...zones.flatMap((z) => (z.swing ? [z.fixed, z.swing] : [z.fixed]))];
+}
+const SWING_VERT = swingValues(AIRFLOW_VERT_ZONES);
+const SWING_HOR = swingValues(AIRFLOW_HOR_ZONES);
 
 function oneOf<T extends string>(allowed: readonly T[], value: unknown): T | null {
   if (typeof value === 'string' && (allowed as readonly string[]).includes(value)) {
@@ -25,6 +79,16 @@ function finiteNumber(value: unknown): number | null {
     return value;
   }
   return null;
+}
+
+// The setpoint is bounded here so an out-of-range reading can never push the
+// Dial past its arc; the current/outdoor readings stay as reported.
+function boundedTemp(value: unknown): number | null {
+  const n = finiteNumber(value);
+  if (n === null) {
+    return null;
+  }
+  return Math.min(TEMP_MAX, Math.max(TEMP_MIN, n));
 }
 
 function nullableString(value: unknown): string | null {
@@ -43,12 +107,12 @@ function normalizeState(raw: unknown): ACState {
     online: r.online === true,
     power: r.power === true,
     mode: oneOf(MODES, r.mode),
-    targetTemp: finiteNumber(r.targetTemp),
+    targetTemp: boundedTemp(r.targetTemp),
     currentTemp: finiteNumber(r.currentTemp),
     outdoorTemp: finiteNumber(r.outdoorTemp),
     fanSpeed: oneOf(FAN_SPEEDS, r.fanSpeed),
-    swingVert: nullableString(r.swingVert),
-    swingHor: nullableString(r.swingHor),
+    swingVert: oneOf(SWING_VERT, r.swingVert),
+    swingHor: oneOf(SWING_HOR, r.swingHor),
     air: oneOf(AIR_MODES, r.air),
     lights: r.lights === true,
     turbo: r.turbo === true,
@@ -64,14 +128,33 @@ function normalizeState(raw: unknown): ACState {
 }
 
 // Every bridge endpoint answers with the full fresh state, so this is not
-// generic: one request path, one normalization point.
+// generic: one request path, one normalization point. Every failure leaves
+// as a typed AcError, never a bare Error.
 async function req(path: string, init?: RequestInit): Promise<ACState> {
-  const res = await fetch(BASE + path, {
-    cache: 'no-store', // never reuse a cached AC state reading
-    signal: AbortSignal.timeout(8000), // don't let a hung request stack up
-    headers: { 'Content-Type': 'application/json' },
-    ...init,
-  });
+  const headers: Record<string, string> = {};
+  if (init?.body != null) {
+    headers['Content-Type'] = 'application/json';
+  }
+  const token = readToken();
+  if (token !== '') {
+    headers.Authorization = `Bearer ${token}`;
+  }
+
+  let res: Response;
+  try {
+    res = await fetch(BASE + path, {
+      cache: 'no-store', // never reuse a cached AC state reading
+      signal: AbortSignal.timeout(8000), // don't let a hung request stack up
+      headers,
+      ...init,
+    });
+  } catch (e) {
+    if (e instanceof Error && e.name === 'TimeoutError') {
+      throw new AcError('timeout', 'Request timed out');
+    }
+    throw new AcError('network', 'Network request failed');
+  }
+
   if (!res.ok) {
     const body: unknown = await res.json().catch(() => null);
     let message = `Request failed: ${res.status}`;
@@ -81,9 +164,25 @@ async function req(path: string, init?: RequestInit): Promise<ACState> {
         message = detail;
       }
     }
-    throw new Error(message);
+    if (res.status === 503) {
+      throw new AcError('ac-offline', message);
+    }
+    if (res.status === 400) {
+      throw new AcError('rejected', message);
+    }
+    if (res.status === 401) {
+      throw new AcError('auth', message);
+    }
+    throw new AcError('server', message);
   }
-  return normalizeState(await res.json());
+
+  let body: unknown;
+  try {
+    body = await res.json();
+  } catch {
+    throw new AcError('server', 'Malformed response from the bridge');
+  }
+  return normalizeState(body);
 }
 
 /**
@@ -99,7 +198,12 @@ export function subscribeState(
   onState: (state: ACState) => void,
   onDrop: () => void,
 ): () => void {
-  const source = new EventSource(BASE + '/events');
+  const token = readToken();
+  let url = BASE + '/events';
+  if (token !== '') {
+    url += '?token=' + encodeURIComponent(token);
+  }
+  const source = new EventSource(url);
 
   source.onmessage = (event: MessageEvent<string>) => {
     try {

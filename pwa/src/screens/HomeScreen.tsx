@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { AnimatePresence, m, useReducedMotion } from 'framer-motion';
 import { acClient } from '../api/acClient';
+import type { AcError } from '../api/acClient';
 import type { ACState, Mode, Quiet } from '../api/types';
-import { DEVICE_NAME, MODE_OPTIONS, FAN_OPTIONS, QUIET_OPTIONS } from '../options';
+import { DEVICE_NAME, MODE_OPTIONS, FAN_OPTIONS, QUIET_OPTIONS, TEMP_MIN, TEMP_MAX } from '../options';
 import { HELP, type HelpEntry } from '../help';
 import { Dial } from '../components/Dial';
 import { PowerToggle } from '../components/PowerToggle';
@@ -17,9 +18,6 @@ import { FeatureTiles } from '../components/FeatureTiles';
 import { InfoButton } from '../components/InfoButton';
 import { HelpPanel } from '../components/HelpPanel';
 import { Icon } from '../components/Icon';
-
-const TEMP_MIN = 16;
-const TEMP_MAX = 30;
 
 // Minimum gap between setpoint commits while tapping +/−. The first tap in a
 // burst sends immediately; only follow-ups inside this window coalesce into one
@@ -39,7 +37,7 @@ const container = {
 
 interface Props {
   state: ACState | null;
-  error: string | null;
+  error: AcError | null;
   command: (fn: () => Promise<ACState>) => Promise<void>;
 }
 
@@ -50,9 +48,10 @@ export function HomeScreen({ state, error, command }: Props) {
   const online = !!state?.online;
   const offline = state ? !online : false;
   const power = !!state?.power;
-  // Controls grey out only when the unit is genuinely unavailable — never for an
-  // in-flight write. The write is optimistic, so there is nothing to wait on.
-  const disabled = offline;
+  // Controls grey out only when the unit is genuinely unavailable — before the
+  // first reading or while offline — never for an in-flight write. The write
+  // is optimistic, so there is nothing to wait on.
+  const disabled = connecting || offline;
   const controls = disabled || !power; // secondary controls need power on
 
   // Inline help toggles for the sections that don't use SectionLabel.
@@ -116,8 +115,8 @@ export function HomeScreen({ state, error, command }: Props) {
           <h1 className="mt-[3px] text-[27px] font-extrabold tracking-[-0.02em] text-text">
             {DEVICE_NAME}
           </h1>
-          <p className="flex items-center gap-1.5 text-[13px] text-t2">
-            <StatusDot connecting={connecting} error={!!error} offline={offline} power={power} />
+          <p role="status" className="flex items-center gap-1.5 text-[13px] text-t2">
+            <StatusDot connecting={connecting} error={error} offline={offline} power={power} />
             {subtitle}
           </p>
         </div>
@@ -139,7 +138,7 @@ export function HomeScreen({ state, error, command }: Props) {
             current={state?.currentTemp ?? null}
             mode={state?.mode ?? null}
             power={power}
-            online={online}
+            online={connecting ? null : online}
             min={TEMP_MIN}
             max={TEMP_MAX}
           />
@@ -300,14 +299,39 @@ function SectionLabel({ title, help, children }: { title: string; help?: HelpEnt
 }
 
 /** One line under the title: connection state first, then what's running. */
-function subtitleFor(state: ACState | null, error: string | null): string {
+function subtitleFor(state: ACState | null, error: AcError | null): string {
+  if (error) {
+    const base = errorSubtitle(error);
+    if (error.kind === 'network' || error.kind === 'timeout' || error.kind === 'ac-offline') {
+      return withLastSeen(base, state);
+    }
+    return base;
+  }
   if (!state) return 'Connecting…';
-  if (error) return 'Can’t reach the bridge';
-  if (!state.online) return 'Unit offline';
+  if (!state.online) return withLastSeen('Unit offline', state);
   if (!state.power) return 'Standby';
   const mode = MODE_OPTIONS.find((o) => o.key === state.mode)?.label ?? '—';
   const fan = FAN_OPTIONS.find((o) => o.key === state.fanSpeed)?.label.toLowerCase() ?? '—';
   return `${mode} · Fan ${fan}`;
+}
+
+function errorSubtitle(error: AcError): string {
+  if (error.kind === 'network' || error.kind === 'timeout') return 'Can’t reach the bridge';
+  if (error.kind === 'ac-offline') return 'Unit offline';
+  if (error.kind === 'auth') return 'Token required — see Settings';
+  return error.message;
+}
+
+/** "… · as of 14:32": how old the reading on screen is, once it may no longer
+ *  be live — what matters when checking remotely whether the heat is on. */
+function withLastSeen(base: string, state: ACState | null): string {
+  if (!state?.updatedAt) return base;
+  const at = new Date(state.updatedAt);
+  if (Number.isNaN(at.getTime())) return base;
+  const time = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });
+  if (at.toDateString() === new Date().toDateString()) return `${base} · as of ${time}`;
+  const day = at.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+  return `${base} · as of ${day}, ${time}`;
 }
 
 /** "Monday · 21 Jul" per the design's header kicker. */
@@ -325,13 +349,14 @@ function StatusDot({
   power,
 }: {
   connecting: boolean;
-  error: boolean;
+  error: AcError | null;
   offline: boolean;
   power: boolean;
 }) {
   let color = 'var(--accent)';
-  if (connecting) color = 'var(--text-subtle)';
+  if (error && error.kind === 'ac-offline') color = 'var(--warning-500)';
   else if (error) color = 'var(--danger-500)';
+  else if (connecting) color = 'var(--text-subtle)';
   else if (offline) color = 'var(--warning-500)';
   else if (!power) color = 'var(--text-subtle)';
   return (

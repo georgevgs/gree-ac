@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { acClient, subscribeState } from '../api/acClient';
+import { acClient, subscribeState, toAcError } from '../api/acClient';
+import type { AcError } from '../api/acClient';
 import type { ACState } from '../api/types';
 import { readDemoState } from '../demo';
 
@@ -7,6 +8,9 @@ import { readDemoState } from '../demo';
 // slow while the stream is healthy, brisk while it isn't.
 const POLL_MS = 2000;
 const POLL_MS_STREAMING = 15000;
+
+// How long a failed write stays on screen before it clears itself.
+const COMMAND_ERROR_MS = 4000;
 
 // ACState is flat (primitives only), so field equality is full equality.
 // Returning the previous reference lets React bail out of re-rendering the
@@ -21,13 +25,32 @@ export function useACState() {
   // Dev-only ?demo= preview: freeze a canned state, no polling or writes.
   const demo = useMemo(() => readDemoState(), []);
   const [state, setState] = useState<ACState | null>(demo);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<AcError | null>(null);
+  // A failed write lives apart from `error`: the read path clears `error` on
+  // every good poll, which would wipe the failure off screen before anyone
+  // read it. This one only leaves via its own timer or an explicit dismiss.
+  const [commandError, setCommandError] = useState<AcError | null>(null);
   const [streaming, setStreaming] = useState(false);
 
   // A write's response must not be clobbered by a poll that was already in
   // flight when it landed — a slow read would otherwise resurrect the old
   // setpoint seconds later. Drop any read issued before the newest write.
   const lastWriteAt = useRef(0);
+
+  const commandErrorTimer = useRef<number | null>(null);
+  useEffect(() => {
+    return () => {
+      if (commandErrorTimer.current !== null) window.clearTimeout(commandErrorTimer.current);
+    };
+  }, []);
+
+  const dismissCommandError = useCallback(() => {
+    if (commandErrorTimer.current !== null) {
+      window.clearTimeout(commandErrorTimer.current);
+      commandErrorTimer.current = null;
+    }
+    setCommandError(null);
+  }, []);
 
   const refresh = useCallback(async () => {
     if (demo) return;
@@ -37,24 +60,43 @@ export function useACState() {
       if (startedAt >= lastWriteAt.current) setState((prev) => keepIfSame(prev, s));
       setError(null);
     } catch (e) {
-      setError((e as Error).message);
+      setError(toAcError(e));
     }
   }, [demo]);
 
   // Live push. The stream also carries the current state on connect, so a
   // reconnect re-syncs on its own. Frames are device truth and always win —
   // including over a write's optimistic echo, which is the point.
+  //
+  // iOS kills the socket when the app suspends and WebKit doesn't reliably
+  // fire onerror for it, so `streaming` would stay true over a dead stream and
+  // the fallback poll would idle at its slow period. Re-subscribing whenever
+  // the tab returns to the foreground makes the resume self-syncing.
   useEffect(() => {
     if (demo) return;
 
-    return subscribeState(
-      (s) => {
-        setStreaming(true);
-        setState((prev) => keepIfSame(prev, s));
-        setError(null);
-      },
-      () => setStreaming(false),
-    );
+    const subscribe = () =>
+      subscribeState(
+        (s) => {
+          setStreaming(true);
+          setState((prev) => keepIfSame(prev, s));
+          setError(null);
+        },
+        () => setStreaming(false),
+      );
+
+    let unsubscribe = subscribe();
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      unsubscribe();
+      unsubscribe = subscribe();
+    };
+    document.addEventListener('visibilitychange', onVisibility);
+
+    return () => {
+      document.removeEventListener('visibilitychange', onVisibility);
+      unsubscribe();
+    };
   }, [demo]);
 
   // Poll while the tab is visible; pause when hidden; refresh immediately on
@@ -104,20 +146,26 @@ export function useACState() {
   // and that is derived from `state`, not from the write.
   const command = useCallback(
     async (fn: () => Promise<ACState>) => {
+      if (demo) return;
       try {
         const s = await fn();
         lastWriteAt.current = Date.now();
         setState((prev) => keepIfSame(prev, s));
         setError(null);
       } catch (e) {
-        setError((e as Error).message);
+        if (commandErrorTimer.current !== null) window.clearTimeout(commandErrorTimer.current);
+        setCommandError(toAcError(e));
+        commandErrorTimer.current = window.setTimeout(() => {
+          setCommandError(null);
+          commandErrorTimer.current = null;
+        }, COMMAND_ERROR_MS);
         void refresh();
       }
     },
-    [refresh],
+    [demo, refresh],
   );
 
   // `refresh` stays internal: it backs the poll loop and write-failure
   // re-sync; no consumer triggers a manual refresh.
-  return { state, error, command };
+  return { state, error, command, commandError, dismissCommandError };
 }

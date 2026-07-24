@@ -18,6 +18,7 @@ export type IconName =
   | 'gear'
   | 'cloud'
   | 'wifi'
+  | 'key'
   | 'info'
   | 'plus'
   | 'minus';
@@ -119,6 +120,12 @@ const PATHS: Record<IconName, ReactNode> = {
   ),
   cloud: <path d="M7 18h10a4 4 0 0 0 0-8 5.5 5.5 0 0 0-10.6-1A3.5 3.5 0 0 0 7 18z" />,
   wifi: <path d="M2 8.5a15 15 0 0 1 20 0M5 12a10 10 0 0 1 14 0M8 15.5a5.5 5.5 0 0 1 8 0M12 19h.01" />,
+  key: (
+    <>
+      <path d="M2.586 17.414A2 2 0 0 0 2 18.828V21a1 1 0 0 0 1 1h3a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h1a1 1 0 0 0 1-1v-1a1 1 0 0 1 1-1h.172a2 2 0 0 0 1.414-.586l.814-.814a6.5 6.5 0 1 0-4-4z" />
+      <circle cx="16.5" cy="7.5" r=".5" fill="currentColor" />
+    </>
+  ),
   info: (
     <>
       <path d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18z" />

@@ -6,6 +6,11 @@ import type { ThemePref } from './hooks/useTheme';
  *  VITE_DEVICE_NAME in pwa/.env; the generic default suits any GREE-based AC. */
 export const DEVICE_NAME = import.meta.env.VITE_DEVICE_NAME || 'AC';
 
+/** Setpoint range the unit accepts (°C) — shared by the Dial, the stepper, and
+ *  the API boundary's clamp. */
+export const TEMP_MIN = 16;
+export const TEMP_MAX = 30;
+
 // Display definitions for every control. Values mirror the bridge's allow-lists
 // (fixed by the gree-hvac-client version); labels are what the user sees.
 

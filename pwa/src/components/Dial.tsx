@@ -8,7 +8,8 @@ interface Props {
   current: number | null;
   mode: Mode | null;
   power: boolean;
-  online: boolean;
+  /** null while connecting — the dial then claims nothing about the unit. */
+  online: boolean | null;
   min?: number;
   max?: number;
 }
@@ -18,7 +19,7 @@ interface Props {
  *  only — the stepper below it adjusts. */
 export function Dial({ temp, current, mode, power, online, min = 16, max = 30 }: Props) {
   const reduce = useReducedMotion();
-  const active = power && online && mode != null;
+  const active = power && online === true && mode != null;
   const pct = temp == null ? 0 : Math.round(((temp - min) / (max - min)) * 100);
   const color = active && mode ? modeColor(mode) : 'var(--text-subtle)';
 

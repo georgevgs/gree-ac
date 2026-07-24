@@ -66,7 +66,9 @@ const MODE_STATUS: Record<Mode, string> = {
   auto: 'Auto',
 };
 
-/** What the unit is doing right now, e.g. "Cooling". */
-export function modeStatus(mode: Mode | null, power: boolean, online: boolean): string {
+/** What the unit is doing right now, e.g. "Cooling". Null `online` means
+ *  still connecting — no verdict yet, so claim nothing. */
+export function modeStatus(mode: Mode | null, power: boolean, online: boolean | null): string {
+  if (online == null) return '—';
   return !online ? 'Offline' : !power ? 'Off' : mode ? MODE_STATUS[mode] : '—';
 }
