@@ -4,7 +4,7 @@ members = ["crates/greehvac", "crates/greehvacd", "crates/greehvac-probe"]
 
 [workspace.package]
 edition = "2021"
-license = "GPL-3.0-only"
+license = "MIT"
 
 # Tuned for the Pi Zero W: small binary, small resident set.
 [profile.release]
