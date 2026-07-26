@@ -146,7 +146,31 @@ ssh -t "$PI_USER@$PI_HOST" "
 # --- 5. verify ---------------------------------------------------------
 bold "==> Health check"
 sleep 3
-if ! curl -fsS -m 10 "http://$PI_HOST:$PORT/api/health"; then
+
+# Every /api route sits behind the bearer token when one is configured, health
+# included, so an unauthenticated check here would just assert a 401 forever.
+# The token lives in a systemd drop-in on the Pi and deliberately never in the
+# tracked unit file, so read it back over ssh. Checking it this way also proves
+# the token still works after the restart, which is the thing most likely to
+# have broken.
+TOKEN="$(ssh "$PI_USER@$PI_HOST" \
+  "sudo sed -n 's/^Environment=API_TOKEN=//p' /etc/systemd/system/greehvacd.service.d/*.conf 2>/dev/null | tail -1" \
+  || true)"
+if [ -n "$TOKEN" ]; then
+  echo "    authenticating with the token from the Pi's drop-in"
+fi
+
+# Explicit branch rather than a "${ARGS[@]}" array: macOS still ships bash 3.2,
+# where expanding an empty array under `set -u` aborts the script.
+api() {
+  if [ -n "$TOKEN" ]; then
+    curl -fsS -m 10 -H "Authorization: Bearer $TOKEN" "http://$PI_HOST:$PORT$1"
+  else
+    curl -fsS -m 10 "http://$PI_HOST:$PORT$1"
+  fi
+}
+
+if ! api /api/health; then
   echo
   warn "health check failed. Recent logs:"
   ssh "$PI_USER@$PI_HOST" "sudo journalctl -u greehvacd -n 40 --no-pager"
@@ -154,11 +178,25 @@ if ! curl -fsS -m 10 "http://$PI_HOST:$PORT/api/health"; then
 fi
 echo
 echo
-curl -fsS -m 10 "http://$PI_HOST:$PORT/api/state" || true
+api /api/state || true
 echo
 echo
-bold "Done. Open this on your phone (same Wi-Fi), then Share > Add to Home Screen:"
-echo "    http://$PI_HOST:$PORT"
+
+# The tailnet name is the origin to install from: it is the only one that works
+# both at home and away, and it is HTTPS, so the service worker registers.
+TSNAME="$(ssh "$PI_USER@$PI_HOST" \
+  "tailscale status --json 2>/dev/null | sed -n 's/.*\"DNSName\": \"\\([^\"]*\\)\\.\",*/\\1/p' | head -1" \
+  || true)"
+if [ -n "$TSNAME" ]; then
+  bold "Done. Open this on your phone, then Share > Add to Home Screen:"
+  echo "    https://$TSNAME"
+  echo
+  echo "    (works on the home Wi-Fi and over cellular; install this one, not the LAN URL)"
+  echo "    LAN fallback, same Wi-Fi only: http://$PI_HOST:$PORT"
+else
+  bold "Done. Open this on your phone (same Wi-Fi), then Share > Add to Home Screen:"
+  echo "    http://$PI_HOST:$PORT"
+fi
 echo
 echo "Logs:    ssh $PI_USER@$PI_HOST 'journalctl -fu greehvacd'"
 echo "Restart: ssh $PI_USER@$PI_HOST 'sudo systemctl restart greehvacd'"

@@ -46,7 +46,7 @@ PWA (React + TS, "Add to Home Screen")
 .
 ├── gree-hvac-rs/    Rust workspace: protocol crate + bridge daemon + probe
 ├── pwa/             React + Vite + Tailwind PWA
-├── docs/            reference-unit findings
+├── docs/            reference-unit findings, Pi runbook, remote access
 ├── .env             bridge config (AC_HOST, PORT, PUBLIC_DIR, ...)
 └── docker-compose.yml
 ```
@@ -91,6 +91,10 @@ reference one before you point it at hardware.
   and Pi Zero W cross-compilation.
 - [pwa/README.md](pwa/README.md): app development, configuration
   (`VITE_DEVICE_NAME` and friends), and load-performance notes.
+- [docs/remote-access.md](docs/remote-access.md): reaching the app from
+  outside the house, and why it is built this way.
+- [docs/pi-runbook.md](docs/pi-runbook.md): the Raspberry Pi Zero W setup,
+  every deploy and diagnostic command.
 - [docs/reference-unit.md](docs/reference-unit.md): what was measured on the
   Toyotomi Umi.
 
@@ -106,8 +110,10 @@ reference one before you point it at hardware.
   binary, builds the PWA, ships both, and restarts the unit. First-time setup
   and every diagnostic live in [docs/pi-runbook.md](docs/pi-runbook.md).
 
-For remote access reuse whatever the host already has (Tailscale, Cloudflare
-Tunnel). Don't introduce a second mechanism, and don't port-forward.
+To reach it from outside the house, the Pi joins a tailnet and `tailscale
+serve` puts the app behind a real certificate, so one HTTPS URL works at home
+and away. Setup, the one-origin rule, and the checks that actually prove it:
+[docs/remote-access.md](docs/remote-access.md). Never port-forward the bridge.
 
 ## Security model
 

@@ -1,6 +1,6 @@
 [Unit]
 Description=Gree HVAC bridge (greehvacd)
-Documentation=https://github.com/gvagdas/gree-ac
+Documentation=https://github.com/georgevgs/gree-ac
 After=network-online.target
 Wants=network-online.target
 

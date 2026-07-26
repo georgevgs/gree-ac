@@ -31,9 +31,13 @@ every compressible file (see below). The bridge serves `dist/` when
 
 The service worker (production only) caches the app shell for offline
 install. It never caches live AC state; `/api/*` always goes to the network.
-Note the SW only registers in a secure context: over a plain
-`http://192.168.x.x` LAN URL browsers don't expose the API at all, so on the
-phone the HTTP cache below is what actually does the work.
+
+The SW only registers in a secure context. Over a plain `http://192.168.x.x`
+LAN URL browsers don't expose the API at all, and the HTTP cache below is what
+actually does the work. Reach the app over its HTTPS tailnet name instead (see
+[../docs/remote-access.md](../docs/remote-access.md)) and the worker registers,
+so the shell boots from cache and the app can render its own offline state
+rather than a browser error page.
 
 ## Load performance (it matters: the bridge may be a Pi Zero W)
 

@@ -48,6 +48,95 @@ cat > /etc/NetworkManager/conf.d/wifi-powersave-off.conf <<'EOF'
 wifi.powersave = 2
 EOF
 
+# --- network watchdog --------------------------------------------------
+# Power save off stops the radio parking between beacons, but it does not stop
+# the BCM43438 from losing the association outright, and NetworkManager does
+# not always win it back. On a box nobody is standing next to, that is the
+# difference between "the AC is remote-controllable" and "the AC is a brick
+# until someone flies there". The ladder is deliberately slow: a Wi-Fi blip
+# must not turn into a reboot loop.
+bold "==> Installing the network watchdog"
+cat > /usr/local/sbin/net-watchdog.sh <<'WATCHDOG'
+#!/usr/bin/env bash
+#
+# net-watchdog.sh — keep the Pi on the network unattended.
+#
+# Pings the default gateway. Three consecutive misses bounce the radio, ten
+# reboot the box. The counter lives in /run, so a reboot always starts the
+# ladder over rather than compounding.
+#
+# NOT set -e: a failed ping is the normal path here and must not abort us.
+set -uo pipefail
+
+STATE=/run/net-watchdog.fails
+SOFT_AFTER=3    # ~6 min at the 2 min timer cadence: restart NetworkManager
+HARD_AFTER=10   # ~20 min: reboot
+
+log() { logger -t net-watchdog "$*"; }
+run() {
+  if [ "${WATCHDOG_DRY_RUN:-0}" = "1" ]; then
+    log "DRY RUN: would run: $*"
+  else
+    "$@"
+  fi
+}
+
+# Derived, not hardcoded, so renumbering the LAN does not silently disarm this.
+GW="${WATCHDOG_GW:-$(ip route show default 2>/dev/null | awk '{print $3; exit}')}"
+
+if [ -n "$GW" ] && ping -c 2 -W 3 "$GW" >/dev/null 2>&1; then
+  # Healthy. Clear the counter and make sure the remote path is up too: a
+  # dead tailscaled is invisible from inside the house but fatal from outside.
+  rm -f "$STATE"
+  if ! systemctl is-active --quiet tailscaled; then
+    log "gateway $GW is up but tailscaled is down; restarting it"
+    run systemctl restart tailscaled
+  fi
+  exit 0
+fi
+
+FAILS=$(cat "$STATE" 2>/dev/null || echo 0)
+FAILS=$((FAILS + 1))
+echo "$FAILS" > "$STATE"
+log "no route to gateway (${GW:-none found}), consecutive failures: $FAILS"
+
+if [ "$FAILS" -ge "$HARD_AFTER" ]; then
+  log "still down after $FAILS checks; rebooting"
+  run systemctl reboot
+elif [ "$FAILS" -eq "$SOFT_AFTER" ]; then
+  log "down for $FAILS checks; restarting NetworkManager"
+  run systemctl restart NetworkManager
+fi
+WATCHDOG
+chmod 0755 /usr/local/sbin/net-watchdog.sh
+
+cat > /etc/systemd/system/net-watchdog.service <<'EOF'
+[Unit]
+Description=Network watchdog (Wi-Fi recovery for the AC bridge)
+Documentation=https://github.com/georgevgs/gree-ac
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/net-watchdog.sh
+EOF
+
+cat > /etc/systemd/system/net-watchdog.timer <<'EOF'
+[Unit]
+Description=Run the network watchdog every 2 minutes
+
+[Timer]
+# Late enough that a cold boot has had a real chance to associate first.
+OnBootSec=3min
+OnUnitActiveSec=2min
+AccuracySec=30s
+
+[Install]
+WantedBy=timers.target
+EOF
+
+systemctl daemon-reload
+systemctl enable --now net-watchdog.timer
+
 # --- locale ------------------------------------------------------------
 # macOS forwards LC_CTYPE=UTF-8, which is no valid glibc locale name, so logins
 # print setlocale warnings.
