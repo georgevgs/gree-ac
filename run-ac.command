@@ -34,7 +34,7 @@ fi
 # otherwise a double-click after pulling changes silently launches stale code.
 if [ ! -f pwa/dist/index.html ]; then
   echo "First run — building the app…"
-  ( cd pwa && npm install && npm run build )
+  ( cd pwa && npm ci && npm run build )
 elif command -v npm >/dev/null 2>&1 \
   && [ -n "$(find pwa/src pwa/public pwa/index.html pwa/package.json pwa/vite.config.ts \
              -newer pwa/dist/index.html -print 2>/dev/null | head -1)" ]; then

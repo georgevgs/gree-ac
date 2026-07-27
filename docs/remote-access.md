@@ -89,7 +89,7 @@ the worker in `pwa/public/sw.js` never registered and the shell cache never
 existed. Measured before the switch:
 
 ```
-origin http://192.168.178.73:8481   secureContext false   serviceWorkerAPI false
+origin http://192.168.1.73:8481   secureContext false   serviceWorkerAPI false
 ```
 
 Over HTTPS it registers, so the app shell now boots from cache and can render
@@ -132,9 +132,15 @@ From the Pi itself the name will not resolve, because it runs with
 `--accept-dns=false`. Pin the address rather than turning that off:
 
 ```bash
-ssh gree-ac 'curl -sS --resolve gree-ac.tail6be2e.ts.net:443:100.118.70.117 \
-  https://gree-ac.tail6be2e.ts.net/api/health -H "Authorization: Bearer <token>"'
+# ON THE PI
+NAME=$(tailscale status --json | sed -n 's/.*"DNSName": "\([^"]*\)\.",*/\1/p' | head -1)
+curl -sS --resolve "$NAME:443:$(tailscale ip -4)" \
+  "https://$NAME/api/health" -H "Authorization: Bearer <token>"
 ```
+
+Both values are read back from `tailscale` rather than written down here. The
+tailnet name is in Certificate Transparency logs anyway, but the node's `100.x`
+address is not, and this file is public.
 
 Then open the app, confirm live state, and change something. Measured on this
 setup: HTTP/2, a Let's Encrypt certificate for the tailnet name, and the first

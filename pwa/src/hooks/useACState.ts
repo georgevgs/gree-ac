@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { acClient, subscribeState, toAcError } from '../api/acClient';
+import { acClient, onTokenChange, subscribeState, toAcError } from '../api/acClient';
 import type { AcError } from '../api/acClient';
-import type { ACState } from '../api/types';
-import { readDemoState } from '../demo';
+import { EMPTY_STATE, type ACState } from '../api/types';
+import { readDemo } from '../demo';
 
 // The bridge pushes every change over SSE, so polling is only a safety net:
 // slow while the stream is healthy, brisk while it isn't.
@@ -22,14 +22,16 @@ function keepIfSame(prev: ACState | null, next: ACState): ACState {
 }
 
 export function useACState() {
-  // Dev-only ?demo= preview: freeze a canned state, no polling or writes.
-  const demo = useMemo(() => readDemoState(), []);
-  const [state, setState] = useState<ACState | null>(demo);
-  const [error, setError] = useState<AcError | null>(null);
+  // Dev-only ?demo= preview: freeze a canned situation, no polling or writes.
+  // A demo can pin a read failure or an unlanded write too, so the states that
+  // most need visual checking are the ones a screenshot can actually reach.
+  const demo = useMemo(() => readDemo(), []);
+  const [state, setState] = useState<ACState | null>(demo?.state ?? null);
+  const [error, setError] = useState<AcError | null>(demo?.error ?? null);
   // A failed write lives apart from `error`: the read path clears `error` on
   // every good poll, which would wipe the failure off screen before anyone
   // read it. This one only leaves via its own timer or an explicit dismiss.
-  const [commandError, setCommandError] = useState<AcError | null>(null);
+  const [commandError, setCommandError] = useState<AcError | null>(demo?.commandError ?? null);
   const [streaming, setStreaming] = useState(false);
 
   // A write's response must not be clobbered by a poll that was already in
@@ -86,15 +88,22 @@ export function useACState() {
       );
 
     let unsubscribe = subscribe();
-    const onVisibility = () => {
-      if (document.visibilityState !== 'visible') return;
+    const reconnect = () => {
       unsubscribe();
       unsubscribe = subscribe();
     };
+    const onVisibility = () => {
+      if (document.visibilityState !== 'visible') return;
+      reconnect();
+    };
     document.addEventListener('visibilitychange', onVisibility);
+    // The token is baked into the stream's URL, so a new one only takes effect
+    // on a fresh connection.
+    const stopWatchingToken = onTokenChange(reconnect);
 
     return () => {
       document.removeEventListener('visibilitychange', onVisibility);
+      stopWatchingToken();
       unsubscribe();
     };
   }, [demo]);
@@ -116,6 +125,10 @@ export function useACState() {
     const start = () => {
       if (interval === null) interval = window.setInterval(() => void refresh(), period);
     };
+    // No `focus` listener beside this one: in a standalone PWA both fire on the
+    // same foreground, which just doubled every resume into two reads of the
+    // same state. The read that stays is the one that matters — iOS can leave a
+    // dead stream looking alive, so a resume must not trust `streaming`.
     const onVisibility = () => {
       if (document.visibilityState === 'visible') {
         void refresh();
@@ -124,17 +137,18 @@ export function useACState() {
         stop();
       }
     };
-    const onFocus = () => void refresh();
 
-    void refresh();
+    // This effect re-runs whenever `streaming` flips. On the flip to true the
+    // stream has just delivered a full snapshot, so refreshing here would ask
+    // for the state we were handed a moment ago; on the flip to false the
+    // stream is gone and an immediate read is the whole point.
+    if (!streaming) void refresh();
     start();
     document.addEventListener('visibilitychange', onVisibility);
-    window.addEventListener('focus', onFocus);
 
     return () => {
       stop();
       document.removeEventListener('visibilitychange', onVisibility);
-      window.removeEventListener('focus', onFocus);
     };
   }, [refresh, streaming, demo]);
 
@@ -167,5 +181,17 @@ export function useACState() {
 
   // `refresh` stays internal: it backs the poll loop and write-failure
   // re-sync; no consumer triggers a manual refresh.
-  return { state, error, command, commandError, dismissCommandError };
+  //
+  // `phase` is what "we have not heard from the bridge yet" looks like, and
+  // `state` is never null, so screens read `state.mode` instead of threading
+  // `state?.mode ?? null` through every prop. Optional chaining on server data
+  // belongs at the boundary, not in the components.
+  return {
+    phase: state === null ? ('connecting' as const) : ('live' as const),
+    state: state ?? EMPTY_STATE,
+    error,
+    command,
+    commandError,
+    dismissCommandError,
+  };
 }

@@ -1,6 +1,7 @@
 import { useReducedMotion } from 'framer-motion';
 import type { KeyboardEvent } from 'react';
 import { AIRFLOW_VERT_ZONES, AIRFLOW_HOR_ZONES, type AirflowZone } from '../options';
+import { Icon, type IconName } from './Icon';
 
 /* The Airflow card as two little room diagrams instead of dropdowns: a side
  * view (air tilting up/down) and a top-down view (air turning left/right).
@@ -109,6 +110,7 @@ export function AirflowPicker({ vert, hor, disabled, onSet }: Props) {
         value={vert}
         zones={AIRFLOW_VERT_ZONES}
         geo={VERT_GEO}
+        stepLabels={['Aim higher', 'Aim lower']}
         divider
         disabled={disabled}
         onSet={(v) => onSet('vert', v)}
@@ -119,6 +121,7 @@ export function AirflowPicker({ vert, hor, disabled, onSet }: Props) {
         value={hor}
         zones={AIRFLOW_HOR_ZONES}
         geo={HOR_GEO}
+        stepLabels={['Aim further left', 'Aim further right']}
         disabled={disabled}
         onSet={(v) => onSet('hor', v)}
       />
@@ -132,12 +135,15 @@ function AxisSection({
   value,
   zones,
   geo,
+  stepLabels,
   divider,
   disabled,
   onSet,
 }: {
   title: string;
   ariaLabel: string;
+  /** Names for the two zone-stepper buttons, in index order. */
+  stepLabels: [string, string];
   value: string | null;
   zones: AirflowZone[];
   geo: Geo;
@@ -180,9 +186,10 @@ function AxisSection({
 
   return (
     <div
-      className="flex items-center gap-4 px-[18px] py-4"
+      className="px-[18px] py-4"
       style={divider ? { borderBottom: '1px solid var(--border)' } : undefined}
     >
+      <div className="flex items-center gap-4">
       <svg viewBox="0 0 140 104" className="w-[128px] shrink-0 overflow-visible" role="group" aria-label={ariaLabel}>
         <path
           d={room}
@@ -297,7 +304,64 @@ function AxisSection({
           )}
         </div>
       </div>
+      </div>
+
+      {/* Precise zone choice lives here, not only on the beam. Five zones over
+          a 60-degree fan drawn 128px wide gives hit wedges 10-20px across
+          laterally, so aiming at "Upper" with a thumb regularly landed
+          "Middle" — and the unit audibly acts on the wrong one before you can
+          correct it. The beam stays tappable as the quick, coarse gesture;
+          this is the one that always hits what it says. */}
+      {(kind === 'aim' || kind === 'sweep') && zone >= 0 && (
+        <div className="mt-3 flex items-center gap-2" role="group" aria-label={`${ariaLabel} zone`}>
+          <ZoneStep
+            label={stepLabels[0]}
+            icon="chevronLeft"
+            disabled={disabled || zone === 0}
+            onClick={() => pick(zone - 1)}
+          />
+          <span
+            className="flex-1 text-center text-[13px] font-semibold text-text"
+            aria-live="polite"
+          >
+            {zones[zone].label}
+          </span>
+          <ZoneStep
+            label={stepLabels[1]}
+            icon="chevronRight"
+            disabled={disabled || zone === zones.length - 1}
+            onClick={() => pick(zone + 1)}
+          />
+        </div>
+      )}
     </div>
+  );
+}
+
+/** One end of the zone stepper: a 44px square, so it is hittable where the
+ *  beam wedges are not. */
+function ZoneStep({
+  label,
+  icon,
+  disabled,
+  onClick,
+}: {
+  label: string;
+  icon: IconName;
+  disabled?: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      onClick={onClick}
+      className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full disabled:opacity-40"
+      style={{ background: 'var(--surface-sunken)', color: 'var(--text-muted)' }}
+    >
+      <Icon name={icon} size={18} strokeWidth={2.2} />
+    </button>
   );
 }
 
@@ -380,7 +444,7 @@ function Chip({
         className="block rounded-full px-2.5 py-[5px] text-[12px] font-semibold"
         style={{
           background: active ? 'var(--accent-soft)' : 'var(--surface-sunken)',
-          color: active ? 'var(--accent)' : 'var(--text-muted)',
+          color: active ? 'var(--accent-text)' : 'var(--text-muted)',
           transition: 'background 0.2s ease, color 0.2s ease',
         }}
       >

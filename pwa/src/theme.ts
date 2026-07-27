@@ -9,12 +9,16 @@ import type { Mode } from './api/types';
 
 type Pair = { light: string; dark: string };
 
+// Light lightness is set by the tightest contrast job each color does: the mode
+// icon sitting on its own modeSoft wash, which needs 3:1. Clearing that also
+// clears the dial ring against surface-2 and white glyphs on the power button.
+// Dark values were already clear by a wide margin and are untouched.
 const MODE_HUE: Record<Mode, { h: number; c: number; l: Pair }> = {
-  cool: { h: 230, c: 0.13, l: { light: '0.65', dark: '0.72' } },
-  heat: { h: 40, c: 0.15, l: { light: '0.70', dark: '0.74' } },
-  dry: { h: 300, c: 0.13, l: { light: '0.72', dark: '0.72' } },
-  fan_only: { h: 200, c: 0.1, l: { light: '0.72', dark: '0.72' } },
-  auto: { h: 165, c: 0.14, l: { light: '0.70', dark: '0.78' } },
+  cool: { h: 230, c: 0.13, l: { light: '0.62', dark: '0.72' } },
+  heat: { h: 40, c: 0.15, l: { light: '0.63', dark: '0.74' } },
+  dry: { h: 300, c: 0.13, l: { light: '0.63', dark: '0.72' } },
+  fan_only: { h: 200, c: 0.1, l: { light: '0.62', dark: '0.72' } },
+  auto: { h: 165, c: 0.14, l: { light: '0.61', dark: '0.78' } },
 };
 
 /** The mode's full-strength color (dial ring, active icons). */
@@ -52,6 +56,9 @@ export function modeAccentVars(mode: Mode | null): CSSProperties {
   return {
     '--accent': modeColor(mode),
     '--accent-hover': `light-dark(oklch(${darker(l.light)} ${c} ${h}), oklch(${darker(l.dark)} ${c} ${h}))`,
+    // Text has to retune with everything else, or the tab label and the "On"
+    // sublabels would keep the brand green while the app has gone blue.
+    '--accent-text': modeText(mode),
     '--accent-soft': modeSoft(mode),
     '--on-accent': `light-dark(oklch(1 0 0), oklch(0.15 0.02 ${h}))`,
     '--glow-accent': modeGlow(mode),

@@ -37,3 +37,29 @@ export interface ACState {
   unit: Unit | null;
   updatedAt: string | null;
 }
+
+/** What the app shows before the first reading lands. Every field is the
+ *  "nothing known" value, so a consumer never has to distinguish "no state" from
+ *  "state with nothing in it" — `phase` from useACState says which it is. */
+export const EMPTY_STATE: ACState = {
+  online: false,
+  power: false,
+  mode: null,
+  targetTemp: null,
+  currentTemp: null,
+  outdoorTemp: null,
+  fanSpeed: null,
+  swingVert: null,
+  swingHor: null,
+  air: null,
+  lights: false,
+  turbo: false,
+  quiet: null,
+  health: false,
+  xfan: false,
+  sleep: false,
+  powerSave: false,
+  safetyHeating: false,
+  unit: null,
+  updatedAt: null,
+};

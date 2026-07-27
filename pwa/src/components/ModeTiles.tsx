@@ -38,7 +38,10 @@ export function ModeTiles({ value, disabled, onSelect }: Props) {
     }
     if (next < 0) return;
     e.preventDefault();
+    // Focus still moves while unavailable, so the options can be read; only
+    // the selection is withheld.
     refs.current[next]?.focus();
+    if (disabled) return;
     if (MODE_OPTIONS[next].key !== value) onSelect(MODE_OPTIONS[next].key);
   };
 
@@ -56,15 +59,23 @@ export function ModeTiles({ value, disabled, onSelect }: Props) {
             role="radio"
             aria-checked={active}
             tabIndex={i === focusIdx ? 0 : -1}
-            disabled={disabled}
-            onClick={() => onSelect(opt.key)}
+            // aria-disabled, not the native attribute: a disabled button is
+            // removed from the tab order entirely, so while the unit was
+            // unreachable a screen-reader user could not even hear which modes
+            // exist. This keeps them readable and refuses the press instead.
+            aria-disabled={disabled || undefined}
+            onClick={() => {
+              if (disabled) return;
+              onSelect(opt.key);
+            }}
             onKeyDown={(e) => onKeyDown(e, i)}
             initial={active && !reduce ? { scale: 0.92 } : false}
             animate={active && !reduce ? POP : REST}
             whileTap={disabled ? undefined : { scale: 0.95 }}
             transition={{ type: 'spring', stiffness: 500, damping: 28 }}
-            className="flex min-w-0 flex-1 flex-col items-center rounded-[18px] py-[13px] disabled:opacity-40"
+            className="flex min-w-0 flex-1 flex-col items-center rounded-[18px] py-[13px]"
             style={{
+              opacity: disabled ? 0.4 : 1,
               background: active ? modeSoft(opt.key) : 'var(--surface)',
               border: `1.5px solid ${active ? 'transparent' : 'var(--border)'}`,
               color: active ? modeText(opt.key) : 'var(--text-muted)',

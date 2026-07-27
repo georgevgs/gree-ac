@@ -12,6 +12,7 @@ mod api;
 mod state;
 
 use std::path::PathBuf;
+use std::sync::atomic::AtomicUsize;
 use std::sync::mpsc;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
@@ -24,9 +25,12 @@ use actor::{Command, DeviceState, Snapshot};
 #[derive(Parser)]
 #[command(name = "greehvacd", about = "Gree HVAC control daemon")]
 struct Args {
-    /// LAN IP of the AC. Set a DHCP reservation so it never drifts; unicast is
-    /// more reliable than the `.255` broadcast default.
-    #[arg(long, env = "AC_HOST", default_value = "192.168.1.255")]
+    /// LAN IP of the AC. Required: give the unit a DHCP reservation so it never
+    /// drifts. There is deliberately no broadcast default — with a `.255`
+    /// target the daemon accepts the first device that answers the scan, and
+    /// the AES key that answer is encrypted under is a public protocol constant,
+    /// so any host on the LAN could win that race and own the session.
+    #[arg(long, env = "AC_HOST")]
     host: String,
     /// GREE local UDP port. Rarely changed.
     #[arg(long, env = "AC_PORT", default_value_t = 7000)]
@@ -59,6 +63,9 @@ pub struct AppState {
     pub snapshot: Snapshot,
     pub cmd_tx: mpsc::Sender<Command>,
     pub updates: broadcast::Sender<String>,
+    /// Live SSE streams, so `/api/events` can refuse to open more than the Pi
+    /// can hold. Shared, not per-connection: the count is the whole point.
+    pub sse_clients: Arc<AtomicUsize>,
 }
 
 // current_thread: a Pi Zero W has one core and device I/O runs on its own std
@@ -95,6 +102,7 @@ async fn main() {
         snapshot,
         cmd_tx,
         updates,
+        sse_clients: Arc::new(AtomicUsize::new(0)),
     };
 
     let public_dir = args.public_dir.filter(|dir| {

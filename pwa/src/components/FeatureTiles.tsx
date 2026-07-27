@@ -36,12 +36,14 @@ export function FeatureTiles({ values, mode, disabled, onToggle }: Props) {
             type="button"
             role="switch"
             aria-checked={on}
-            aria-label={t.label}
+            // No aria-label: the visible text already names the tile, and
+            // overriding it also hid the sublabel explaining why a tile is
+            // unavailable ("Heat only"), leaving that reason visual-only.
             disabled={disabled || unavailable}
             onClick={() => onToggle(t.key, !on)}
             whileTap={disabled ? undefined : { scale: 0.96 }}
             transition={{ type: 'spring', stiffness: 500, damping: 30 }}
-            className={`flex items-center gap-2.5 rounded-2xl py-2.5 pl-2.5 pr-3 text-left disabled:opacity-40 ${stretch ? 'col-span-2' : ''}`}
+            className={`flex items-center gap-2.5 rounded-[18px] py-2.5 pl-2.5 pr-3 text-left disabled:opacity-40 ${stretch ? 'col-span-2' : ''}`}
             style={{
               background: on ? 'var(--accent-soft)' : 'var(--surface)',
               border: `1px solid ${on ? 'transparent' : 'var(--card-border)'}`,
@@ -69,7 +71,7 @@ export function FeatureTiles({ values, mode, disabled, onToggle }: Props) {
               <span
                 className="text-[11px] font-semibold"
                 style={{
-                  color: on ? 'var(--accent)' : 'var(--text-subtle)',
+                  color: on ? 'var(--accent-text)' : 'var(--text-subtle)',
                   transition: 'color 0.25s ease',
                 }}
               >

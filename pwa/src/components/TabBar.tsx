@@ -6,7 +6,7 @@ export type Tab = 'home' | 'settings';
 
 const TABS: { key: Tab; label: string; icon: IconName }[] = [
   { key: 'home', label: 'Home', icon: 'home' },
-  { key: 'settings', label: 'Settings', icon: 'gear' },
+  { key: 'settings', label: 'Settings', icon: 'gearCog' },
 ];
 
 type PillRect = { x: number; y: number; width: number; height: number };
@@ -125,9 +125,11 @@ export function TabBar({ tab, onChange }: { tab: Tab; onChange: (t: Tab) => void
             aria-current={active ? 'page' : undefined}
             onClick={() => onChange(t.key)}
             whileTap={{ scale: 0.95 }}
-            className="relative flex items-center gap-2 rounded-full px-5 py-2.5"
+            // py-3, not py-2.5: with a 21px icon the smaller padding made a
+            // 41px-tall target, under the 44px minimum.
+            className="relative flex items-center gap-2 rounded-full px-5 py-3"
             style={{
-              color: active ? 'var(--accent)' : 'var(--text-muted)',
+              color: active ? 'var(--accent-text)' : 'var(--text-muted)',
               transition: 'color 0.2s ease',
             }}
           >

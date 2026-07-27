@@ -25,22 +25,24 @@
 
 use std::convert::Infallible;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
-use axum::extract::{Request, State};
+use axum::extract::rejection::StringRejection;
+use axum::extract::{FromRequest, Request, State};
 use axum::http::{header, HeaderValue, Method, StatusCode};
 use axum::middleware::{from_fn, from_fn_with_state, Next};
 use axum::response::sse::{Event as SseEvent, KeepAlive, Sse};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
-use axum::{Json, Router};
+use axum::{async_trait, Json, Router};
 use futures_util::stream::Stream;
 use serde_json::{json, Value};
 use tokio::sync::oneshot;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
-use tower_http::cors::{AllowOrigin, Any, CorsLayer};
+use tower_http::cors::{AllowOrigin, CorsLayer};
 use tower_http::services::{ServeDir, ServeFile};
 
 use greehvac::property::{self, Property};
@@ -92,7 +94,16 @@ pub fn router(state: AppState, config: ApiConfig) -> Router {
         .route("/api/properties", post(set_properties))
         // Unknown /api paths must answer with the same {"error": ...} envelope
         // instead of falling through to the SPA fallback (or an empty 404).
+        // `/*rest` needs at least one segment, so bare `/api` and `/api/` would
+        // otherwise sail past this router — and past the token gate — into the
+        // static fallback and come back as the app shell with a 200.
+        .route("/api", any(api_not_found))
+        .route("/api/", any(api_not_found))
         .route("/api/*rest", any(api_not_found))
+        // A GET on a POST-only route is answered by axum itself, which emits a
+        // bare 405 with an empty body. Route it through ApiError so the
+        // documented envelope holds on every /api response, not most of them.
+        .method_not_allowed_fallback(method_not_allowed)
         .layer(from_fn(require_json))
         .layer(from_fn(no_store))
         .with_state(state);
@@ -131,6 +142,9 @@ pub fn router(state: AppState, config: ApiConfig) -> Router {
 /// launcher.
 fn static_files(dir: PathBuf) -> Router {
     let index = dir.join("index.html");
+    let assets = ServeDir::new(dir.join("assets"))
+        .precompressed_br()
+        .precompressed_gzip();
     let files = ServeDir::new(&dir)
         .precompressed_br()
         .precompressed_gzip()
@@ -141,28 +155,80 @@ fn static_files(dir: PathBuf) -> Router {
         );
 
     Router::new()
+        // Hashed assets are served WITHOUT the SPA fallback, so a miss is a 404.
+        // Sharing the fallback would answer a stale `/assets/index-OLD.js` with
+        // index.html, which `cache_static` then stamps `immutable` at a .js URL:
+        // the script fails on MIME type and the browser holds that wrong body
+        // for a year. One deploy race, a year of white screens.
+        .nest_service("/assets", assets)
         .fallback_service(files)
         .layer(from_fn(cache_static))
 }
 
+/// Cache policy, plus the security headers for everything the browser renders.
+///
+/// The bearer token lives in `localStorage`, so a script injected into this
+/// origin could read it. There is no injection point today (the PWA has no HTML
+/// sinks), and CSP is what keeps that true if one ever appears. `frame-ancestors`
+/// is the load-bearing one right now: without it any page can iframe the bridge
+/// and clickjack the power toggle for anyone whose browser can reach the tailnet.
 async fn cache_static(request: Request, next: Next) -> Response {
-    let immutable = request.uri().path().starts_with("/assets/");
+    let hashed = request.uri().path().starts_with("/assets/");
     let mut response = next.run(request).await;
 
-    response.headers_mut().insert(
+    // `immutable` promises the bytes at this URL never change. Only promise it
+    // for a hashed asset that actually resolved — caching a 404 for a year is a
+    // self-inflicted outage.
+    let immutable = hashed && response.status().is_success();
+
+    let headers = response.headers_mut();
+    headers.insert(
         header::CACHE_CONTROL,
         HeaderValue::from_static(match immutable {
             true => "public, max-age=31536000, immutable",
             false => "no-cache",
         }),
     );
+    headers.insert(
+        header::X_CONTENT_TYPE_OPTIONS,
+        HeaderValue::from_static("nosniff"),
+    );
+    headers.insert(
+        header::REFERRER_POLICY,
+        HeaderValue::from_static("no-referrer"),
+    );
+    // `script-src` still needs 'unsafe-inline' for the pre-paint theme script in
+    // index.html, which has to run before first paint to avoid a scheme flash.
+    // Moving it to a file would cost a round trip on every cold load; hashing it
+    // would couple this header to the built HTML. Everything else is locked down.
+    headers.insert(
+        header::CONTENT_SECURITY_POLICY,
+        HeaderValue::from_static(
+            "default-src 'self'; \
+             script-src 'self' 'unsafe-inline'; \
+             style-src 'self' 'unsafe-inline'; \
+             img-src 'self' data:; \
+             font-src 'self'; \
+             connect-src 'self'; \
+             manifest-src 'self'; \
+             frame-ancestors 'none'; \
+             base-uri 'none'; \
+             form-action 'none'; \
+             object-src 'none'",
+        ),
+    );
     response
 }
 
 /// Unset (or blank) means no CORS layer at all: the daemon serves the PWA
 /// same-origin, so no cross-origin allowance is needed. Otherwise a
-/// comma-separated allowlist (the Vite dev-server case), or `*` for any origin
-/// — an explicit, deliberate opt-in.
+/// comma-separated allowlist — in practice just the Vite dev server.
+///
+/// `*` is refused. The whole reason a drive-by page cannot POST to this daemon
+/// is that `require_json` forces a preflight and the absent CORS policy fails
+/// it; `*` would answer that preflight and hand every page on the internet the
+/// heat pump. The dev-server case it was meant to serve is covered exactly by
+/// naming `http://localhost:5173`.
 fn cors_layer(origin: Option<String>) -> Option<CorsLayer> {
     let spec = origin?;
     let spec = spec.trim();
@@ -170,21 +236,57 @@ fn cors_layer(origin: Option<String>) -> Option<CorsLayer> {
         return None;
     }
 
-    let layer = CorsLayer::new().allow_methods(Any).allow_headers(Any);
     if "*" == spec {
-        return Some(layer.allow_origin(Any));
-    }
-
-    let origins: Vec<HeaderValue> = spec
-        .split(',')
-        .filter_map(|o| o.trim().parse().ok())
-        .collect();
-
-    if origins.is_empty() {
-        log::warn!("CORS_ORIGIN has no parseable origin; cross-origin access stays off");
+        log::error!(
+            "CORS_ORIGIN=* would let any website drive this AC; refusing it. \
+             Name the origin instead, e.g. CORS_ORIGIN=http://localhost:5173"
+        );
         return None;
     }
-    Some(layer.allow_origin(AllowOrigin::list(origins)))
+
+    // A bare `HeaderValue` parse accepts any visible ASCII, so `localhost:5173`
+    // (no scheme) would sail through and then silently never match an Origin.
+    // Say so at startup instead of shipping an app that cannot talk to itself.
+    let mut origins: Vec<HeaderValue> = Vec::new();
+    for entry in spec.split(',') {
+        let entry = entry.trim();
+        if entry.is_empty() {
+            continue;
+        }
+        match is_origin(entry).then(|| entry.parse().ok()).flatten() {
+            Some(value) => origins.push(value),
+            None => log::warn!(
+                "CORS_ORIGIN entry {entry:?} is not a scheme://host[:port] origin; ignoring it"
+            ),
+        }
+    }
+
+    if origins.is_empty() {
+        log::warn!("CORS_ORIGIN has no usable origin; cross-origin access stays off");
+        return None;
+    }
+    Some(
+        CorsLayer::new()
+            .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+            // Only what the PWA actually sends. `Any` would also make
+            // `Authorization` a permitted cross-origin header.
+            .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION])
+            .allow_origin(AllowOrigin::list(origins)),
+    )
+}
+
+/// `scheme://host[:port]`, no path, no trailing slash — the exact shape a
+/// browser puts in an `Origin` header, since that is what it gets compared to.
+fn is_origin(value: &str) -> bool {
+    let Some((scheme, rest)) = value.split_once("://") else {
+        return false;
+    };
+    let scheme_ok = !scheme.is_empty()
+        && scheme
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, '+' | '-' | '.'));
+    let host_ok = !rest.is_empty() && !rest.contains('/');
+    scheme_ok && host_ok
 }
 
 // ---------------------------------------------------------------- reads
@@ -198,9 +300,41 @@ async fn get_state(State(state): State<AppState>) -> Json<AcState> {
     Json(state::dto(&device.props, device.online, device.updated_at))
 }
 
+/// Ceiling on concurrent SSE streams. Each is cheap on its own, but nothing
+/// else bounds them: on a 512 MB Pi the only backstop is systemd OOM-killing
+/// the daemon and `Restart=always` bringing it back to be killed again. A
+/// household needs a handful; anything near this is a client leaking streams or
+/// someone on the LAN opening them deliberately.
+const MAX_SSE_CLIENTS: usize = 32;
+
+/// Frees its slot when the stream it rides on is dropped — a clean disconnect,
+/// a phone leaving Wi-Fi, or a killed connection all land here.
+struct SseSlot(Arc<AtomicUsize>);
+
+impl Drop for SseSlot {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::Relaxed);
+    }
+}
+
 async fn events(
     State(state): State<AppState>,
-) -> Sse<impl Stream<Item = Result<SseEvent, Infallible>>> {
+) -> Result<Sse<impl Stream<Item = Result<SseEvent, Infallible>>>, ApiError> {
+    // Check and claim in one atomic step: reading the count and then
+    // incrementing it would let N simultaneous connections all see room for one.
+    let live = state.sse_clients.clone();
+    let claimed = live.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |open| {
+        (open < MAX_SSE_CLIENTS).then_some(open + 1)
+    });
+    if claimed.is_err() {
+        log::warn!("refusing SSE connection: {MAX_SSE_CLIENTS} streams already open");
+        return Err(ApiError(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "too many live connections".to_string(),
+        ));
+    }
+    let slot = SseSlot(live);
+
     // Subscribe before reading the snapshot: an update published between the
     // two would otherwise never reach this client, and events are full
     // snapshots, so it would stay stale until the next change.
@@ -214,19 +348,24 @@ async fn events(
         SseEvent::default().data(serde_json::to_string(&dto).unwrap_or_default()),
     ));
 
-    let live = BroadcastStream::new(receiver).filter_map(|result| match result {
-        Ok(payload) => Some(Ok(SseEvent::default().data(payload))),
-        Err(_) => None, // lagged receiver: drop and continue (state is self-healing)
+    let updates = BroadcastStream::new(receiver).filter_map(move |result| {
+        // Owned by the stream so the slot is released exactly when the stream
+        // ends, however it ends.
+        let _hold = &slot;
+        match result {
+            Ok(payload) => Some(Ok(SseEvent::default().data(payload))),
+            Err(_) => None, // lagged receiver: drop and continue (state is self-healing)
+        }
     });
 
-    Sse::new(initial.chain(live)).keep_alive(KeepAlive::default())
+    Ok(Sse::new(initial.chain(updates)).keep_alive(KeepAlive::default()))
 }
 
 // --------------------------------------------------------------- writes
 
 async fn set_power(
     State(state): State<AppState>,
-    body: String,
+    JsonBody(body): JsonBody,
 ) -> Result<Json<AcState>, ApiError> {
     let body = parse_body(&body)?;
     let on = body
@@ -237,7 +376,7 @@ async fn set_power(
     write(&state, vec![(Property::Power, i64::from(on))]).await
 }
 
-async fn set_temp(State(state): State<AppState>, body: String) -> Result<Json<AcState>, ApiError> {
+async fn set_temp(State(state): State<AppState>, JsonBody(body): JsonBody) -> Result<Json<AcState>, ApiError> {
     let body = parse_body(&body)?;
     let temp = body
         .get("temp")
@@ -253,19 +392,19 @@ async fn set_temp(State(state): State<AppState>, body: String) -> Result<Json<Ac
     write(&state, vec![(Property::Temperature, temp as i64)]).await
 }
 
-async fn set_mode(State(state): State<AppState>, body: String) -> Result<Json<AcState>, ApiError> {
+async fn set_mode(State(state): State<AppState>, JsonBody(body): JsonBody) -> Result<Json<AcState>, ApiError> {
     let body = parse_body(&body)?;
     let mode = enum_field(&body, "mode", Property::Mode)?;
     write(&state, vec![(Property::Mode, mode)]).await
 }
 
-async fn set_fan(State(state): State<AppState>, body: String) -> Result<Json<AcState>, ApiError> {
+async fn set_fan(State(state): State<AppState>, JsonBody(body): JsonBody) -> Result<Json<AcState>, ApiError> {
     let body = parse_body(&body)?;
     let speed = enum_field(&body, "speed", Property::FanSpeed)?;
     write(&state, vec![(Property::FanSpeed, speed)]).await
 }
 
-async fn set_swing(State(state): State<AppState>, body: String) -> Result<Json<AcState>, ApiError> {
+async fn set_swing(State(state): State<AppState>, JsonBody(body): JsonBody) -> Result<Json<AcState>, ApiError> {
     let body = parse_body(&body)?;
 
     let mut props = Vec::new();
@@ -282,7 +421,7 @@ async fn set_swing(State(state): State<AppState>, body: String) -> Result<Json<A
     write(&state, props).await
 }
 
-async fn set_option(State(state): State<AppState>, body: String) -> Result<Json<AcState>, ApiError> {
+async fn set_option(State(state): State<AppState>, JsonBody(body): JsonBody) -> Result<Json<AcState>, ApiError> {
     let body = parse_body(&body)?;
     let key = body.get("key").and_then(Value::as_str).unwrap_or_default();
     let value = body.get("value").unwrap_or(&Value::Null);
@@ -325,7 +464,7 @@ async fn set_option(State(state): State<AppState>, body: String) -> Result<Json<
 /// task-shaped endpoints above don't cover.
 async fn set_properties(
     State(state): State<AppState>,
-    body: String,
+    JsonBody(body): JsonBody,
 ) -> Result<Json<AcState>, ApiError> {
     let body = parse_body(&body)?;
     let object = body
@@ -449,6 +588,77 @@ async fn api_not_found() -> ApiError {
     ApiError(StatusCode::NOT_FOUND, "unknown API route".to_string())
 }
 
+async fn method_not_allowed() -> ApiError {
+    ApiError(
+        StatusCode::METHOD_NOT_ALLOWED,
+        "method not allowed on this route".to_string(),
+    )
+}
+
+/// The request body, with extractor failures mapped into the same
+/// `{"error": ...}` envelope as everything else.
+///
+/// Taking a bare `String` lets axum answer an oversized body (413) or invalid
+/// UTF-8 (400) with a bare `text/plain` line, which breaks the one contract
+/// every client is told it can rely on. Going through `ApiError` here makes the
+/// envelope a property of the router rather than of each handler remembering.
+struct JsonBody(String);
+
+#[async_trait]
+impl<S: Send + Sync> FromRequest<S> for JsonBody {
+    type Rejection = ApiError;
+
+    async fn from_request(request: Request, state: &S) -> Result<Self, Self::Rejection> {
+        String::from_request(request, state)
+            .await
+            .map(JsonBody)
+            .map_err(|rejection: StringRejection| {
+                ApiError(rejection.status(), rejection.body_text())
+            })
+    }
+}
+
+/// Percent-decode a query value.
+///
+/// `EventSource` URLs are built with `encodeURIComponent`, so a token holding
+/// any reserved character arrives escaped. Comparing the raw bytes would reject
+/// it with a message blaming the token. Byte-wise on purpose: slicing a `str` at
+/// a percent triple can land mid-codepoint, and `panic = "abort"` would take the
+/// daemon down with it.
+fn percent_decode(value: &str) -> String {
+    fn hex(byte: u8) -> Option<u8> {
+        match byte {
+            b'0'..=b'9' => Some(byte - b'0'),
+            b'a'..=b'f' => Some(byte - b'a' + 10),
+            b'A'..=b'F' => Some(byte - b'A' + 10),
+            _ => None,
+        }
+    }
+
+    let bytes = value.as_bytes();
+    let mut out: Vec<u8> = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        let decoded = match bytes[i] {
+            b'%' if i + 2 < bytes.len() => hex(bytes[i + 1])
+                .zip(hex(bytes[i + 2]))
+                .map(|(hi, lo)| (hi << 4) | lo),
+            _ => None,
+        };
+        match decoded {
+            Some(byte) => {
+                out.push(byte);
+                i += 3;
+            }
+            None => {
+                out.push(bytes[i]);
+                i += 1;
+            }
+        }
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// Writes must declare `Content-Type: application/json`. A cross-site page can
 /// fire a POST with `text/plain` (or no Content-Type) as a CORS "simple
 /// request" that skips preflight entirely; requiring the JSON media type moves
@@ -498,23 +708,29 @@ async fn auth(
 
     let secret = secret.as_ref();
 
+    // RFC 7235: the auth-scheme is case-insensitive. Matching "Bearer " exactly
+    // fails closed, but it 401s a spec-compliant client with a message that
+    // blames the token.
     let header_ok = request
         .headers()
         .get(header::AUTHORIZATION)
         .and_then(|value| value.to_str().ok())
-        .and_then(|value| value.strip_prefix("Bearer "))
-        .map(|value| constant_time_eq(value, secret))
+        .and_then(|value| value.split_once(' '))
+        .filter(|(scheme, _)| scheme.eq_ignore_ascii_case("bearer"))
+        .map(|(_, token)| constant_time_eq(token.trim(), secret))
         .unwrap_or(false);
 
-    // NOTE: query-param tokens can end up in access logs. Prefer the header
-    // everywhere except the EventSource connection.
-    let query_ok = request
-        .uri()
-        .query()
-        .into_iter()
-        .flat_map(|q| q.split('&'))
-        .filter_map(|pair| pair.strip_prefix("token="))
-        .any(|value| constant_time_eq(value, secret));
+    // Query tokens can land in any proxy's access log, so this is scoped to the
+    // one caller that has no alternative: browser `EventSource` cannot set
+    // headers. Every other route takes the header only.
+    let query_ok = "/api/events" == request.uri().path()
+        && request
+            .uri()
+            .query()
+            .into_iter()
+            .flat_map(|q| q.split('&'))
+            .filter_map(|pair| pair.strip_prefix("token="))
+            .any(|value| constant_time_eq(&percent_decode(value), secret));
 
     if header_ok || query_ok {
         return Ok(next.run(request).await);
@@ -585,6 +801,7 @@ mod tests {
             snapshot,
             cmd_tx,
             updates,
+            sse_clients: Arc::new(AtomicUsize::new(0)),
         };
         (router(state, config), sent)
     }
@@ -802,6 +1019,127 @@ mod tests {
         assert_eq!(
             "http://localhost:5173",
             response.headers()[header::ACCESS_CONTROL_ALLOW_ORIGIN]
+        );
+    }
+
+    /// `CORS_ORIGIN=*` would answer the preflight that is the only thing
+    /// stopping a drive-by page from driving the AC, so it is refused outright
+    /// rather than honoured.
+    #[tokio::test]
+    async fn a_wildcard_cors_origin_is_refused() {
+        let (router, _) = harness_with(
+            true,
+            ApiConfig {
+                cors_origin: Some("*".to_string()),
+                token: None,
+                public_dir: None,
+            },
+        );
+        let request = Request::builder()
+            .uri("/api/state")
+            .header(header::ORIGIN, "http://evil.example")
+            .body(Body::empty())
+            .unwrap();
+        let response = router.oneshot(request).await.unwrap();
+        assert!(response
+            .headers()
+            .get(header::ACCESS_CONTROL_ALLOW_ORIGIN)
+            .is_none());
+    }
+
+    /// An entry with no scheme can never match an `Origin` header, so it is
+    /// reported instead of silently producing an app that cannot call itself.
+    #[tokio::test]
+    async fn a_cors_entry_without_a_scheme_is_ignored() {
+        assert!(cors_layer(Some("localhost:5173".to_string())).is_none());
+        assert!(cors_layer(Some("http://localhost:5173".to_string())).is_some());
+        // One good entry beside one bad one still configures the good one.
+        assert!(cors_layer(Some("nope, http://localhost:5173".to_string())).is_some());
+    }
+
+    /// Every /api answer carries the `{"error": ...}` envelope, including the
+    /// three that axum itself used to emit as bare text or an empty body.
+    #[tokio::test]
+    async fn every_api_failure_uses_the_error_envelope() {
+        let (router, _) = harness(true);
+
+        // GET on a POST-only route: axum's MethodNotAllowed.
+        let (status, body) = call(&router, "GET", "/api/power", "").await;
+        assert_eq!(StatusCode::METHOD_NOT_ALLOWED, status);
+        assert_eq!(json!("method not allowed on this route"), body["error"]);
+
+        // Body that is not valid UTF-8 is a String extractor rejection.
+        let request = Request::builder()
+            .method("POST")
+            .uri("/api/power")
+            .header(header::CONTENT_TYPE, "application/json")
+            .body(Body::from(vec![0xff, 0xfe]))
+            .unwrap();
+        let response = router.clone().oneshot(request).await.unwrap();
+        assert_eq!(StatusCode::BAD_REQUEST, response.status());
+        let bytes = axum::body::to_bytes(response.into_body(), 64 * 1024)
+            .await
+            .unwrap();
+        let body: Value = serde_json::from_slice(&bytes).expect("400 body must be JSON");
+        assert!(body["error"].is_string());
+    }
+
+    /// `/*rest` needs at least one segment, so these two used to fall past the
+    /// API router into the static fallback — outside the token gate.
+    #[tokio::test]
+    async fn bare_api_paths_stay_inside_the_api_router() {
+        let (router, _) = harness(true);
+        for path in ["/api", "/api/", "/api/nope"] {
+            let (status, body) = call(&router, "GET", path, "").await;
+            assert_eq!(StatusCode::NOT_FOUND, status, "{path}");
+            assert_eq!(json!("unknown API route"), body["error"], "{path}");
+        }
+    }
+
+    /// RFC 7235 makes the auth-scheme case-insensitive, and a query token is
+    /// accepted only for the SSE stream, which cannot send headers.
+    #[tokio::test]
+    async fn token_auth_accepts_any_scheme_case_and_scopes_the_query_form() {
+        let secret = "s3cret";
+        let router = || {
+            harness_with(
+                true,
+                ApiConfig {
+                    cors_origin: None,
+                    token: Some(secret.to_string()),
+                    public_dir: None,
+                },
+            )
+            .0
+        };
+        let get = |uri: &'static str, auth: Option<&'static str>| {
+            let mut builder = Request::builder().uri(uri);
+            if let Some(value) = auth {
+                builder = builder.header(header::AUTHORIZATION, value);
+            }
+            let request = builder.body(Body::empty()).unwrap();
+            let router = router();
+            async move { router.oneshot(request).await.unwrap().status() }
+        };
+
+        assert_eq!(StatusCode::OK, get("/api/state", Some("Bearer s3cret")).await);
+        assert_eq!(StatusCode::OK, get("/api/state", Some("bearer s3cret")).await);
+        assert_eq!(StatusCode::OK, get("/api/state", Some("BEARER s3cret")).await);
+        assert_eq!(
+            StatusCode::UNAUTHORIZED,
+            get("/api/state", Some("Bearer wrong")).await
+        );
+        // Query tokens can land in a proxy log, so only the stream takes them.
+        assert_eq!(
+            StatusCode::UNAUTHORIZED,
+            get("/api/state?token=s3cret", None).await
+        );
+        assert_eq!(StatusCode::OK, get("/api/events?token=s3cret", None).await);
+        // encodeURIComponent output must compare equal to the raw secret.
+        assert_eq!(StatusCode::OK, get("/api/events?token=s3%63ret", None).await);
+        assert_eq!(
+            StatusCode::UNAUTHORIZED,
+            get("/api/events?atoken=s3cret", None).await
         );
     }
 

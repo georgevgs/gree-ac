@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { ACState, Unit } from '../api/types';
-import { acClient, readToken, writeToken } from '../api/acClient';
+import { acClient, bridgeHost, readToken, writeToken } from '../api/acClient';
 import { DEVICE_NAME, UNIT_OPTIONS, THEME_OPTIONS } from '../options';
 import type { ThemePref } from '../hooks/useTheme';
 import { Icon } from '../components/Icon';
@@ -8,7 +8,9 @@ import { Row } from '../components/Row';
 import { Segmented } from '../components/Segmented';
 
 interface Props {
-  state: ACState | null;
+  /** 'connecting' until the first reading lands; `state` is empty until then. */
+  phase: 'connecting' | 'live';
+  state: ACState;
   command: (fn: () => Promise<ACState>) => Promise<void>;
   theme: ThemePref;
   setTheme: (t: ThemePref) => void;
@@ -16,10 +18,10 @@ interface Props {
 
 /** Settings per the design: device card, Preferences, System. App appearance
  *  lives here (not a unit control); no accounts, so no sign-out. */
-export function SettingsScreen({ state, command, theme, setTheme }: Props) {
-  const online = !!state?.online;
+export function SettingsScreen({ phase, state, command, theme, setTheme }: Props) {
+  const online = state.online;
   // Availability only — never dims for an in-flight write (see useACState).
-  const disabled = !state || !online;
+  const disabled = phase === 'connecting' || !online;
 
   return (
     <div className="flex flex-col">
@@ -74,7 +76,7 @@ export function SettingsScreen({ state, command, theme, setTheme }: Props) {
           right={
             <Segmented<Unit>
               items={UNIT_OPTIONS}
-              value={state?.unit ?? null}
+              value={state.unit}
               disabled={disabled}
               label="Temperature unit shown on the AC unit"
               onChange={(u) => command(() => acClient.setOption('unit', u))}
@@ -85,7 +87,7 @@ export function SettingsScreen({ state, command, theme, setTheme }: Props) {
 
       <div className="label-mono mb-2.5 px-0.5">System</div>
       <div className="card overflow-hidden">
-        <Row icon="wifi" label="Bridge" divider right={window.location.host || '—'} />
+        <Row icon="wifi" label="Bridge" divider right={bridgeHost() || '—'} />
         <Row icon="key" label="Token" divider right={<TokenField />} />
         <Row icon="info" label="Version" right={`v${__APP_VERSION__} · ${__BUILD_DATE__}`} />
       </div>
@@ -111,7 +113,10 @@ function TokenField() {
         writeToken(e.target.value);
       }}
       onBlur={() => setToken((v) => v.trim())}
-      className="w-[140px] border-none bg-transparent text-right text-[14px] text-t2 placeholder:text-t3"
+      // 16px, not the 14px the rest of the row values use: iOS Safari zooms the
+      // whole page when focusing any input below 16px, and the fix must not be
+      // to disable user zoom.
+      className="w-[140px] border-none bg-transparent text-right text-[16px] text-t2 placeholder:text-t3"
     />
   );
 }

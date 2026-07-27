@@ -15,12 +15,9 @@
 set -euo pipefail
 
 # --- config ------------------------------------------------------------
-PI_HOST="${PI_HOST:-gree-ac.local}"
-PI_USER="${PI_USER:-p0mman}"
 TARGET="arm-unknown-linux-musleabihf"   # ARMv6 + VFPv2. NOT armv7: that SIGILLs.
 REMOTE_PWA="/srv/gree-ac/pwa"
 REMOTE_BIN="/usr/local/bin/greehvacd"
-PORT="8481"
 
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$REPO_DIR"
@@ -28,6 +25,25 @@ cd "$REPO_DIR"
 bold() { printf '\033[1m%s\033[0m\n' "$*"; }
 warn() { printf '\033[33m%s\033[0m\n' "$*"; }
 die()  { printf '\033[31m%s\033[0m\n' "$*" >&2; exit 1; }
+
+# Where this house's Pi is and what it is called live in the untracked .env,
+# never in this file: it is committed to a public repo, and an account name plus
+# an address is free reconnaissance for anyone who later reaches the tailnet.
+# Environment wins over .env so a one-off `PI_HOST=… ./deploy-pi.command` works.
+if [ -f .env ]; then
+  set -a
+  # shellcheck disable=SC1091
+  . ./.env
+  set +a
+fi
+PI_HOST="${PI_HOST:-gree-ac.local}"
+PI_USER="${PI_USER:-}"
+# Set after sourcing .env, not before: the daemon on the Pi takes its port from
+# the unit file, so a PORT meant for a local `cargo run` must not retarget the
+# health check at a port nothing is listening on.
+PORT="8481"
+[ -n "$PI_USER" ]         || die "PI_USER is not set. Add the Pi's login name to .env (PI_USER=...)."
+[ -n "${AC_HOST:-}" ]     || die "AC_HOST is not set. Add the AC's LAN IP to .env (AC_HOST=...)."
 
 # --- 1. toolchain ------------------------------------------------------
 bold "==> Checking the ARMv6 toolchain"
@@ -104,7 +120,7 @@ echo "    size: $(du -h "$BIN" | cut -f1)"
 
 # --- 3. build the PWA --------------------------------------------------
 bold "==> Building the PWA"
-( cd pwa && npm install --silent && npm run build )
+( cd pwa && npm ci --silent && npm run build )
 [ -d pwa/dist ] || die "pwa/dist missing after build"
 
 # --- 4. ship -----------------------------------------------------------
@@ -130,14 +146,37 @@ rsync -az --delete pwa/dist/ "$PI_USER@$PI_HOST:$REMOTE_PWA/"
 ssh "$PI_USER@$PI_HOST" "chmod -R a+rX /srv/gree-ac"
 echo "    $(find pwa/dist -type f | wc -l | tr -d ' ') files synced to $REMOTE_PWA"
 
-scp -q "$BIN" "$PI_USER@$PI_HOST:/tmp/greehvacd.new"
-scp -q gree-hvac-rs/deploy/greehvacd.service "$PI_USER@$PI_HOST:/tmp/greehvacd.service"
+# The unit file is tracked in git and reinstalled here on every ship, so a
+# token in it would be both committed and overwritten. Refuse to deploy rather
+# than ship a secret to a public repo.
+if grep -qE '^[[:space:]]*Environment=API_TOKEN=' gree-hvac-rs/deploy/greehvacd.service; then
+  die "API_TOKEN is set in the tracked unit file. Move it to a root-only drop-in
+     (/etc/systemd/system/greehvacd.service.d/10-token.conf) and remove the line;
+     the unit file's own comment has the command."
+fi
+
+# Staged under the deploy user's home, not /tmp: on a Pi with more than one
+# account, anything in world-writable /tmp can be swapped between the copy and
+# the `sudo install` that follows it.
+STAGE="/home/$PI_USER/.cache/gree-ac"
+ssh "$PI_USER@$PI_HOST" "mkdir -p '$STAGE' && chmod 700 '$STAGE'"
+scp -q "$BIN" "$PI_USER@$PI_HOST:$STAGE/greehvacd.new"
+
+# The tracked unit carries a placeholder for the AC's address; fill it in from
+# .env on the way out so the real one exists only on this Mac and on the Pi.
+UNIT_TMP="$(mktemp -t greehvacd.service)"
+trap 'rm -f "$UNIT_TMP"' EXIT
+sed "s|__AC_HOST__|$AC_HOST|" gree-hvac-rs/deploy/greehvacd.service > "$UNIT_TMP"
+if grep -q '__AC_HOST__' "$UNIT_TMP"; then
+  die "failed to substitute AC_HOST into the unit file"
+fi
+scp -q "$UNIT_TMP" "$PI_USER@$PI_HOST:$STAGE/greehvacd.service"
 
 ssh -t "$PI_USER@$PI_HOST" "
   set -e
-  sudo install -m 0755 /tmp/greehvacd.new '$REMOTE_BIN'
-  sudo install -m 0644 /tmp/greehvacd.service /etc/systemd/system/greehvacd.service
-  rm -f /tmp/greehvacd.new /tmp/greehvacd.service
+  sudo install -m 0755 '$STAGE/greehvacd.new' '$REMOTE_BIN'
+  sudo install -m 0644 '$STAGE/greehvacd.service' /etc/systemd/system/greehvacd.service
+  rm -f '$STAGE/greehvacd.new' '$STAGE/greehvacd.service'
   sudo systemctl daemon-reload
   sudo systemctl enable greehvacd
   sudo systemctl restart greehvacd
@@ -156,17 +195,38 @@ sleep 3
 TOKEN="$(ssh "$PI_USER@$PI_HOST" \
   "sudo sed -n 's/^Environment=API_TOKEN=//p' /etc/systemd/system/greehvacd.service.d/*.conf 2>/dev/null | tail -1" \
   || true)"
+
+# The checks below carry the bearer token, so prefer the tailnet HTTPS origin:
+# the LAN URL is plain HTTP, and anyone holding the Wi-Fi PSK can read a token
+# off the air. `/` is the app shell, which sits outside the token gate, so it
+# probes reachability without needing to authenticate.
+TSNAME="$(ssh "$PI_USER@$PI_HOST" \
+  "tailscale status --json 2>/dev/null | sed -n 's/.*\"DNSName\": \"\\([^\"]*\\)\\.\",*/\\1/p' | head -1" \
+  || true)"
+
+API_BASE="http://$PI_HOST:$PORT"
+if [ -n "$TSNAME" ] && curl -fsS -m 5 -o /dev/null "https://$TSNAME/" 2>/dev/null; then
+  API_BASE="https://$TSNAME"
+fi
+
 if [ -n "$TOKEN" ]; then
   echo "    authenticating with the token from the Pi's drop-in"
+  case "$API_BASE" in
+    https://*) ;;
+    *) warn "    this Mac isn't on the tailnet; the token crosses the LAN over plain HTTP" ;;
+  esac
 fi
 
 # Explicit branch rather than a "${ARGS[@]}" array: macOS still ships bash 3.2,
 # where expanding an empty array under `set -u` aborts the script.
+# The token goes in on stdin, never in argv, where `ps` would show it to every
+# account on this machine for the life of the request.
 api() {
   if [ -n "$TOKEN" ]; then
-    curl -fsS -m 10 -H "Authorization: Bearer $TOKEN" "http://$PI_HOST:$PORT$1"
+    printf 'header = "Authorization: Bearer %s"\n' "$TOKEN" \
+      | curl -fsS -m 10 --config - "$API_BASE$1"
   else
-    curl -fsS -m 10 "http://$PI_HOST:$PORT$1"
+    curl -fsS -m 10 "$API_BASE$1"
   fi
 }
 
@@ -184,9 +244,7 @@ echo
 
 # The tailnet name is the origin to install from: it is the only one that works
 # both at home and away, and it is HTTPS, so the service worker registers.
-TSNAME="$(ssh "$PI_USER@$PI_HOST" \
-  "tailscale status --json 2>/dev/null | sed -n 's/.*\"DNSName\": \"\\([^\"]*\\)\\.\",*/\\1/p' | head -1" \
-  || true)"
+# (Looked up above, before the health check, so the token rides HTTPS.)
 if [ -n "$TSNAME" ]; then
   bold "Done. Open this on your phone, then Share > Add to Home Screen:"
   echo "    https://$TSNAME"

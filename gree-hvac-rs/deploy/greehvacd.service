@@ -8,18 +8,27 @@ Wants=network-online.target
 ExecStart=/usr/local/bin/greehvacd
 
 # --- configuration -----------------------------------------------------
-# The AC's LAN IP. Unicast beats the .255 broadcast default, so give the AC
-# a static DHCP lease (FRITZ!Box: Home Network > the device > "always assign
-# same address") and keep this in sync.
-Environment=AC_HOST=192.168.178.71
+# The AC's LAN IP, substituted from the untracked .env by deploy-pi.command.
+# It is not written here because this file is committed to a public repo. Give
+# the AC a static DHCP lease (FRITZ!Box: Home Network > the device > "always
+# assign same address") and set AC_HOST in .env.
+Environment=AC_HOST=__AC_HOST__
 Environment=PORT=8481
 Environment=BIND_ADDR=0.0.0.0
 Environment=RUST_LOG=info
 # The bridge serves the built PWA itself: one process, one URL, no web server.
 Environment=PUBLIC_DIR=/srv/gree-ac/pwa
-# Uncomment to require a bearer token on /api (generate: openssl rand -hex 32).
-# The PWA sends it from its Settings screen.
-# Environment=API_TOKEN=change-me
+# API_TOKEN does NOT belong in this file: it is tracked in git, and
+# deploy-pi.command overwrites it on every ship. Put it in a root-only drop-in,
+# which survives deploys and never leaves the Pi:
+#
+#   sudo install -d -m 0755 /etc/systemd/system/greehvacd.service.d
+#   printf '[Service]\nEnvironment=API_TOKEN=%s\n' "$(openssl rand -hex 32)" \
+#     | sudo install -m 0600 /dev/stdin \
+#       /etc/systemd/system/greehvacd.service.d/10-token.conf
+#   sudo systemctl daemon-reload && sudo systemctl restart greehvacd
+#
+# The PWA then takes the same value in its Settings screen.
 
 # --- lifecycle ---------------------------------------------------------
 Restart=always

@@ -127,16 +127,24 @@ That is fine for a private home Wi-Fi and nothing else.
 - **Set `API_TOKEN`** (defense-in-depth; generate one with
   `openssl rand -hex 32`) whenever anyone untrusted can join the network, or
   the bridge is reachable over a tunnel. Every `/api` request then needs
-  `Authorization: Bearer <token>` (or `?token=` for `EventSource`, which can't
-  send headers; note query tokens can land in access logs). The PWA sends the
-  token from its Settings screen. The comparison is constant-time, and 401s
-  use the same `{"error": ...}` envelope as every other failure.
+  `Authorization: Bearer <token>`. `EventSource` cannot send headers, so
+  `/api/events?token=` is accepted on that route alone, since a token in a URL
+  can land in a proxy's access log. The PWA sends the token from its Settings
+  screen. The comparison is constant-time, and every `/api` failure uses the
+  same `{"error": ...}` envelope, 401 and 405 included.
 - **Browser drive-by writes are blocked twice over**: every POST must carry
   `Content-Type: application/json`, which keeps cross-site writes out of the
-  CORS "simple request" category and forces a preflight — and with CORS off by
-  default, the preflight fails. A token still closes the gap for non-browser
+  CORS "simple request" category and forces a preflight, and with CORS off by
+  default the preflight fails. `CORS_ORIGIN=*` is refused for that reason;
+  name the origin instead. A token still closes the gap for non-browser
   callers already on the network.
+- **The app shell ships a CSP** with `frame-ancestors 'none'`, so the bridge
+  cannot be framed and its controls clickjacked, plus `nosniff` and
+  `no-referrer`.
 - The daemon logs a startup warning whenever `/api` runs without auth.
+- **`AC_HOST` is required**, with no broadcast default: a `.255` target makes
+  the daemon trust whichever device answers the scan first, and the key that
+  answer is encrypted under is a public protocol constant.
 - Nothing in this repo contains device secrets. The GREE "generic" AES keys in
   the crypto layer are protocol constants every client implementation ships,
   and the per-device key is derived at bind time and held only in memory.

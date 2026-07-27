@@ -50,11 +50,25 @@ real browser:
 | | over the network |
 |---|---|
 | cold launch (uncompressed, single bundle) | ~379 KB |
-| cold launch (now) | 139 KB |
-| re-launch | 2.1 KB (just revalidating the shell) |
+| cold launch (now) | 130 KB |
+| re-launch | 0 KB on the critical path |
 
 React and framer-motion are split into their own chunks, so bumping the PWA
-re-downloads ~13 KB of app code instead of the whole bundle.
+re-downloads ~13 KB of app code (and ~21 KB once the CSS and worker rehash too)
+instead of the whole bundle.
+
+A re-launch renders from the service worker's cache and revalidates the shell
+in the background, so nothing blocks first paint. That costs one launch of
+staleness after a deploy: the new worker installs while the old one is still
+driving the page, and takes over the next time the app is opened. The trade is
+deliberate. Fetching the shell first put a round trip in front of every launch,
+which is invisible on the LAN and 200-400 ms over Tailscale, on an app that is
+open for ten seconds at a time.
+
+The worker precaches only the latin `woff2` files. Fontsource ships every
+subset plus `.woff` fallbacks, and each `@font-face` carries a `unicode-range`,
+so the other seven files (83.5 KB) can never render a glyph here; `cache.addAll`
+would have fetched them anyway. `scripts/inject-sw.mjs` prints what it left out.
 
 ## iOS "Add to Home Screen"
 

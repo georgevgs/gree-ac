@@ -1,6 +1,6 @@
 import { m, useReducedMotion } from 'framer-motion';
 import type { Mode } from '../api/types';
-import { modeColor, modeGlow, modeStatus } from '../theme';
+import { modeColor, modeGlow, modeStatus, modeText } from '../theme';
 
 interface Props {
   /** Shown setpoint — may be an optimistic value mid-adjustment. */
@@ -21,7 +21,9 @@ export function Dial({ temp, current, mode, power, online, min = 16, max = 30 }:
   const reduce = useReducedMotion();
   const active = power && online === true && mode != null;
   const pct = temp == null ? 0 : Math.round(((temp - min) / (max - min)) * 100);
-  const color = active && mode ? modeColor(mode) : 'var(--text-subtle)';
+  // modeText, not modeColor: "COOLING" is 11px type on the white readout disc,
+  // and the ring's fill colour only ever had to clear 3:1 against a surface.
+  const color = active && mode ? modeText(mode) : 'var(--text-subtle)';
 
   return (
     <div className="flex justify-center">

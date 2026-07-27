@@ -3,8 +3,8 @@
 # setup-pi.sh — one-time tuning for the Raspberry Pi Zero W running greehvacd.
 #
 # Run once on the Pi after first boot:
-#   scp gree-hvac-rs/deploy/setup-pi.sh p0mman@gree-ac.local:
-#   ssh p0mman@gree-ac.local 'bash setup-pi.sh'
+#   scp gree-hvac-rs/deploy/setup-pi.sh <pi-user>@gree-ac.local:
+#   ssh <pi-user>@gree-ac.local 'bash setup-pi.sh'
 #
 # Everything here is either a correctness fix for the GREE UDP protocol on this
 # hardware, or an SD-card longevity measure. None of it is cosmetic.

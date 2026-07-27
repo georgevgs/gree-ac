@@ -18,13 +18,13 @@ const CORE = ['/', '/index.html', '/manifest.webmanifest', '/icon.svg?v=4', '/ic
 // iOS sits on a white screen for tens of seconds before the fetch gives up.
 const NAV_TIMEOUT_MS = 2500;
 
+// No skipWaiting, deliberately. A new worker activates by deleting every cache
+// but its own, and the page running right now is an older shell still asking
+// for older hashed assets. Taking over mid-session would pull those out from
+// under it, and the server answers a vanished /assets/ URL with a 404. Waiting
+// costs one launch of staleness and removes that whole class of failure.
 self.addEventListener('install', (event) => {
-  event.waitUntil(
-    caches
-      .open(CACHE)
-      .then((c) => c.addAll(CORE))
-      .then(() => self.skipWaiting()),
-  );
+  event.waitUntil(caches.open(CACHE).then((c) => c.addAll(CORE)));
 });
 
 self.addEventListener('activate', (event) => {
@@ -54,25 +54,41 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Navigations: network-first with a short deadline, fall back to the cached
-  // shell. A fresh response also renews the cached shell, so the next offline
-  // launch boots the last-deployed app rather than whatever install captured.
+  // Navigations: answer from cache instantly, renew in the background.
+  //
+  // The shell is ~600 bytes of HTML whose only job is to point at hashed
+  // assets, and this worker's cache holds a matching set of them. Fetching it
+  // first put a full round trip in front of every launch: unnoticeable on the
+  // LAN, 200-400 ms over Tailscale, on an app that is open for ten seconds at a
+  // time. The refresh below still lands, so a deploy is picked up on the next
+  // launch (see the install handler for why it is the next one and not this).
   if (request.mode === 'navigate') {
     event.respondWith(
-      Promise.race([
-        fetch(request),
-        new Promise((_, reject) => {
-          setTimeout(() => reject(new Error('navigation timeout')), NAV_TIMEOUT_MS);
-        }),
-      ])
-        .then((res) => {
+      caches.match('/index.html').then((cached) => {
+        const network = fetch(request).then((res) => {
           if (res && res.status === 200) {
             const copy = res.clone();
             event.waitUntil(caches.open(CACHE).then((c) => c.put('/index.html', copy)));
           }
           return res;
-        })
-        .catch(() => caches.match('/index.html').then((cached) => cached || fetch(request))),
+        });
+
+        if (cached) {
+          // Already answered; the refresh must never surface its own failure.
+          event.waitUntil(network.catch(() => {}));
+          return cached;
+        }
+
+        // Nothing cached (first launch, or the cache was evicted): the network
+        // is the only answer. The deadline stops an unreachable bridge from
+        // parking iOS on a white screen for tens of seconds.
+        return Promise.race([
+          network,
+          new Promise((_, reject) => {
+            setTimeout(() => reject(new Error('navigation timeout')), NAV_TIMEOUT_MS);
+          }),
+        ]);
+      }),
     );
     return;
   }

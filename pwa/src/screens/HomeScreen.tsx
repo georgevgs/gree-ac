@@ -36,18 +36,20 @@ const container = {
 } as const;
 
 interface Props {
-  state: ACState | null;
+  /** 'connecting' until the first reading lands; `state` is empty until then. */
+  phase: 'connecting' | 'live';
+  state: ACState;
   error: AcError | null;
   command: (fn: () => Promise<ACState>) => Promise<void>;
 }
 
-export function HomeScreen({ state, error, command }: Props) {
+export function HomeScreen({ phase, state, error, command }: Props) {
   const reduce = useReducedMotion();
 
-  const connecting = !state;
-  const online = !!state?.online;
-  const offline = state ? !online : false;
-  const power = !!state?.power;
+  const connecting = phase === 'connecting';
+  const online = state.online;
+  const offline = !connecting && !online;
+  const power = state.power;
   // Controls grey out only when the unit is genuinely unavailable — before the
   // first reading or while offline — never for an in-flight write. The write
   // is optimistic, so there is nothing to wait on.
@@ -67,11 +69,11 @@ export function HomeScreen({ state, error, command }: Props) {
   const [held, setHeld] = useState<number | null>(null);
   const commitTimer = useRef<number | null>(null);
   const lastCommitAt = useRef(0);
-  const shownTemp = held ?? state?.targetTemp ?? null;
+  const shownTemp = held ?? state.targetTemp;
 
   useEffect(() => {
-    if (held != null && state?.targetTemp === held) setHeld(null);
-  }, [state?.targetTemp, held]);
+    if (held != null && state.targetTemp === held) setHeld(null);
+  }, [state.targetTemp, held]);
   useEffect(() => {
     if (held == null) return;
     const t = window.setTimeout(() => setHeld(null), 6000);
@@ -79,10 +81,13 @@ export function HomeScreen({ state, error, command }: Props) {
   }, [held]);
 
   const step = (delta: number) => {
-    const base = held ?? state?.targetTemp;
+    const base = held ?? state.targetTemp;
     if (base == null) return;
     const t = Math.min(TEMP_MAX, Math.max(TEMP_MIN, base + delta));
-    if (t === base && t !== TEMP_MIN && t !== TEMP_MAX) return;
+    // Already at the end of the range: nothing changed, so send nothing. The
+    // unit beeps at every command it receives, and beeping at a press that
+    // cannot do anything reads as a fault.
+    if (t === base) return;
     setHeld(t);
     const commit = () => {
       lastCommitAt.current = Date.now();
@@ -101,7 +106,7 @@ export function HomeScreen({ state, error, command }: Props) {
       return power ? s : acClient.setPower(true);
     });
 
-  const subtitle = subtitleFor(state, error);
+  const subtitle = subtitleFor(connecting, state, error);
 
   return (
     <m.div
@@ -128,16 +133,18 @@ export function HomeScreen({ state, error, command }: Props) {
         />
       </m.header>
 
-      {/* Everything below fades toward standby when the unit is off/unreachable. */}
-      <div
-        className="flex flex-col gap-[15px]"
-        style={{ opacity: !connecting && (!power || offline) ? 0.55 : 1, transition: 'opacity 0.35s ease' }}
-      >
+      {/* Standby is shown by the controls themselves, not by a wash over them.
+          A blanket opacity took the mode tiles — which stay live, because
+          picking one wakes the unit — to 2.4:1, and the Inside/Outside readings
+          with them. What is genuinely unavailable already greys itself out via
+          `disabled`, which is exempt from contrast rules; what stays usable now
+          stays readable. The dial still says "Off" and empties its ring. */}
+      <div className="flex flex-col gap-[15px]">
         <m.section variants={item} className="mb-1 mt-2">
           <Dial
             temp={shownTemp}
-            current={state?.currentTemp ?? null}
-            mode={state?.mode ?? null}
+            current={state.currentTemp}
+            mode={state.mode}
             power={power}
             online={connecting ? null : online}
             min={TEMP_MIN}
@@ -159,6 +166,14 @@ export function HomeScreen({ state, error, command }: Props) {
             </span>
             <StepButton dir={1} disabled={controls} onStep={step} />
           </div>
+          {/* The dial is the only place the setpoint is shown, and it is not
+              focusable, so tapping Warmer/Cooler was silent to VoiceOver: no
+              way to know what the new target is without hunting back up the
+              screen. Announcing it here also covers a change made on the
+              physical remote, which arrives over SSE. */}
+          <span className="sr-only" aria-live="polite">
+            {shownTemp == null ? '' : `Set to ${shownTemp} degrees`}
+          </span>
           <AnimatePresence initial={false}>
             {tempHelp && <HelpPanel entry={HELP.temp} />}
           </AnimatePresence>
@@ -166,7 +181,7 @@ export function HomeScreen({ state, error, command }: Props) {
 
         <SectionLabel title="Mode" help={HELP.mode}>
           <ModeTiles
-            value={power && online ? (state?.mode ?? null) : null}
+            value={power && online ? state.mode : null}
             disabled={disabled}
             onSelect={selectMode}
           />
@@ -174,7 +189,7 @@ export function HomeScreen({ state, error, command }: Props) {
 
         <m.section variants={item}>
           <FanSlider
-            value={state?.fanSpeed ?? null}
+            value={state.fanSpeed}
             disabled={controls}
             onChange={(f) => command(() => acClient.setFan(f))}
             help={HELP.fan}
@@ -182,7 +197,7 @@ export function HomeScreen({ state, error, command }: Props) {
         </m.section>
 
         <m.section variants={item}>
-          <StatTiles outdoor={state?.outdoorTemp ?? null} indoor={state?.currentTemp ?? null} />
+          <StatTiles outdoor={state.outdoorTemp} indoor={state.currentTemp} />
         </m.section>
 
         {/* Quick rows */}
@@ -202,7 +217,7 @@ export function HomeScreen({ state, error, command }: Props) {
               }
               right={
                 <Switch
-                  on={!!state?.powerSave}
+                  on={state.powerSave}
                   disabled={controls}
                   label="Eco mode"
                   onToggle={(on) => command(() => acClient.setOption('powerSave', on))}
@@ -230,7 +245,7 @@ export function HomeScreen({ state, error, command }: Props) {
             right={
               <Segmented<Quiet>
                 items={QUIET_OPTIONS}
-                value={state?.quiet ?? null}
+                value={state.quiet}
                 disabled={controls}
                 label="Quiet"
                 onChange={(q) => command(() => acClient.setOption('quiet', q))}
@@ -249,7 +264,7 @@ export function HomeScreen({ state, error, command }: Props) {
         <SectionLabel title="Features" help={HELP.features}>
           <FeatureTiles
             values={state}
-            mode={state?.mode ?? null}
+            mode={state.mode}
             disabled={controls}
             onToggle={(key, next) => command(() => acClient.setOption(key, next))}
           />
@@ -257,8 +272,8 @@ export function HomeScreen({ state, error, command }: Props) {
 
         <SectionLabel title="Airflow" help={HELP.swing}>
           <AirflowPicker
-            vert={state?.swingVert ?? null}
-            hor={state?.swingHor ?? null}
+            vert={state.swingVert}
+            hor={state.swingHor}
             disabled={controls}
             onSet={(axis, v) =>
               command(() =>
@@ -317,7 +332,7 @@ function SectionLabel({ title, help, children }: { title: string; help?: HelpEnt
 }
 
 /** One line under the title: connection state first, then what's running. */
-function subtitleFor(state: ACState | null, error: AcError | null): string {
+function subtitleFor(connecting: boolean, state: ACState, error: AcError | null): string {
   if (error) {
     const base = errorSubtitle(error);
     if (error.kind === 'network' || error.kind === 'timeout' || error.kind === 'ac-offline') {
@@ -325,7 +340,7 @@ function subtitleFor(state: ACState | null, error: AcError | null): string {
     }
     return base;
   }
-  if (!state) return 'Connecting…';
+  if (connecting) return 'Connecting…';
   if (!state.online) return withLastSeen('Unit offline', state);
   if (!state.power) return 'Standby';
   const mode = MODE_OPTIONS.find((o) => o.key === state.mode)?.label ?? '—';
@@ -342,8 +357,8 @@ function errorSubtitle(error: AcError): string {
 
 /** "… · as of 14:32": how old the reading on screen is, once it may no longer
  *  be live — what matters when checking remotely whether the heat is on. */
-function withLastSeen(base: string, state: ACState | null): string {
-  if (!state?.updatedAt) return base;
+function withLastSeen(base: string, state: ACState): string {
+  if (state.updatedAt === null) return base;
   const at = new Date(state.updatedAt);
   if (Number.isNaN(at.getTime())) return base;
   const time = at.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' });

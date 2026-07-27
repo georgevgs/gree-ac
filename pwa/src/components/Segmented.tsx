@@ -35,7 +35,10 @@ export function Segmented<T extends string>({ items, value, disabled, label, onC
     }
     if (next < 0) return;
     e.preventDefault();
+    // Focus still moves while unavailable, so the options can be read; only
+    // the selection is withheld.
     refs.current[next]?.focus();
+    if (disabled) return;
     if (items[next].key !== value) onChange(items[next].key);
   };
 
@@ -58,13 +61,22 @@ export function Segmented<T extends string>({ items, value, disabled, label, onC
             role="radio"
             aria-checked={active}
             tabIndex={i === focusIdx ? 0 : -1}
-            disabled={disabled}
-            onClick={() => onChange(it.key)}
+            // aria-disabled rather than the native attribute, so the options
+            // stay reachable and announceable while the unit is unavailable
+            // (see ModeTiles for the same reasoning).
+            aria-disabled={disabled || undefined}
+            onClick={() => {
+              if (disabled) return;
+              onChange(it.key);
+            }}
             onKeyDown={(e) => onKeyDown(e, i)}
-            className="-my-2 rounded-full py-2 disabled:opacity-40"
+            className="-my-2 rounded-full py-2"
+            style={{ opacity: disabled ? 0.4 : 1 }}
           >
             <span
-              className="block rounded-full px-4 py-[7px] text-[14px] font-semibold"
+              // min-w keeps a one-character option ("1", "2", "3") from
+              // collapsing to a ~40px target that padding alone cannot save.
+              className="block min-w-[44px] rounded-full px-4 py-[7px] text-center text-[14px] font-semibold"
               style={{
                 background: active ? 'var(--surface)' : 'transparent',
                 color: active ? 'var(--text)' : 'var(--text-muted)',

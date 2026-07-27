@@ -5,8 +5,23 @@ export type ThemePref = 'auto' | 'light' | 'dark';
 const KEY = 'ac-theme';
 // Pre-rename key (the app used to be Umi-branded); migrated on first read.
 const LEGACY_KEY = 'umi-theme';
-const BG = { light: '#fbfaf7', dark: '#0e0f13' };
 const ICON = { light: '/icon.svg?v=4', dark: '/icon-dark.svg?v=4' };
+
+/** The two chrome background colors, read once from the media-gated
+ *  `theme-color` tags in index.html rather than restated here. Keeping a second
+ *  copy in TypeScript meant one edit to the palette could leave the iOS status
+ *  bar a different color from the page it sits above. Captured before anything
+ *  below overwrites `content`. */
+let authored: { light: string; dark: string } | null = null;
+function backgrounds() {
+  if (authored === null) {
+    const metas = Array.from(document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]'));
+    const dark = metas.find((m) => m.media.includes('dark'))?.content;
+    const light = metas.find((m) => !m.media.includes('dark'))?.content;
+    authored = dark !== undefined && light !== undefined ? { light, dark } : null;
+  }
+  return authored;
+}
 
 /** Manual appearance override. 'auto' follows the phone (default); 'light' and
  *  'dark' pin color-scheme via data-theme on <html>, which flips every
@@ -35,10 +50,13 @@ export function useTheme() {
     // The media-gated <meta name="theme-color"> tags follow the *system*
     // scheme, so when the theme is pinned the browser chrome would disagree
     // with the page — point both at the pinned background instead.
-    document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach((m) => {
-      const own = m.media.includes('dark') ? BG.dark : BG.light;
-      m.content = theme === 'auto' ? own : BG[theme];
-    });
+    const bg = backgrounds();
+    if (bg !== null) {
+      document.querySelectorAll<HTMLMetaElement>('meta[name="theme-color"]').forEach((m) => {
+        const own = m.media.includes('dark') ? bg.dark : bg.light;
+        m.content = theme === 'auto' ? own : bg[theme];
+      });
+    }
 
     // The favicon: icon.svg adapts by itself in Chromium/Firefox, but Safari
     // ignores media queries inside SVG favicons, and a pinned theme must win

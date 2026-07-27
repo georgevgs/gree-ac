@@ -8,7 +8,7 @@ Everything in this file runs on the **Mac** unless a block is explicitly marked
 | prompt | machine |
 |--------|---------|
 | `➜  ~` | Mac |
-| `p0mman@gree-ac:~ $` | Raspberry Pi |
+| `<pi-user>@gree-ac:~ $` | Raspberry Pi |
 
 `exit` always returns you to the Mac.
 
@@ -16,11 +16,11 @@ Everything in this file runs on the **Mac** unless a block is explicitly marked
 
 | | |
 |---|---|
-| host | `gree-ac.local` / `192.168.178.73` |
-| user | `p0mman` |
+| host | `gree-ac.local` (address: `PI_HOST` in `.env`) |
+| user | `PI_USER` in `.env`, untracked |
 | OS | Raspberry Pi OS Lite 32-bit, Trixie, kernel `6.18.34+rpt-rpi-v6` |
 | arch | `armv6l` — ARMv6 + VFPv2, **not** ARMv7 |
-| AC | `192.168.178.71`, UDP 7000 |
+| AC | `AC_HOST` in `.env`, UDP 7000 |
 | app | `https://gree-ac.tail6be2e.ts.net` (use this one, at home too) |
 | app, LAN fallback | `http://gree-ac.local:8481` |
 
@@ -57,7 +57,7 @@ statically linked, because the failure mode on the Pi is a bare
 If mDNS is being unreliable:
 
 ```bash
-PI_HOST=192.168.178.73 ./deploy-pi.command
+PI_HOST=192.168.1.73 ./deploy-pi.command
 ```
 
 ## Checking on it

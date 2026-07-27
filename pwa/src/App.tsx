@@ -18,16 +18,16 @@ export default function App() {
   // While the unit runs, the accent family follows the active mode (blue for
   // cool, orange for heat…); off/offline falls back to the brand green.
   let accentMode: Mode | null = null;
-  if (ac.state && ac.state.power && ac.state.online) {
+  if (ac.state.power && ac.state.online) {
     accentMode = ac.state.mode;
   }
 
   let screen: ReactNode;
   if (tab === 'home') {
-    screen = <HomeScreen state={ac.state} error={ac.error} command={ac.command} />;
+    screen = <HomeScreen phase={ac.phase} state={ac.state} error={ac.error} command={ac.command} />;
   } else {
     screen = (
-      <SettingsScreen state={ac.state} command={ac.command} theme={theme} setTheme={setTheme} />
+      <SettingsScreen phase={ac.phase} state={ac.state} command={ac.command} theme={theme} setTheme={setTheme} />
     );
   }
 
@@ -48,7 +48,9 @@ export default function App() {
           className="min-h-full"
           style={{ ...modeAccentVars(accentMode), minHeight: '100lvh' }}
         >
-          <div
+          {/* <main>, so screen-reader landmark navigation can skip straight to
+              the controls instead of walking the whole page. */}
+          <main
             className="mx-auto max-w-md px-5 pt-[max(1.25rem,env(safe-area-inset-top))]"
             style={{ paddingBottom: 'calc(96px + env(safe-area-inset-bottom))' }}
           >
@@ -65,7 +67,7 @@ export default function App() {
                 {screen}
               </m.div>
             </AnimatePresence>
-          </div>
+          </main>
           <TabBar tab={tab} onChange={setTab} />
           <CommandErrorBanner error={ac.commandError} onDismiss={ac.dismissCommandError} />
         </div>
@@ -76,11 +78,18 @@ export default function App() {
 
 /** Slim capsule under the status bar naming the write that didn't land — the
  *  toggles are non-optimistic, so without it a failed tap is just silence.
- *  Auto-clears (useACState) and taps away; role="status" reads it aloud. */
+ *  Auto-clears (useACState) and taps away. */
 function CommandErrorBanner({ error, onDismiss }: { error: AcError | null; onDismiss: () => void }) {
   const reduce = useReducedMotion();
   return (
+    // The live region is this wrapper, which is always mounted. Putting it on
+    // the banner meant the region came into existence already containing its
+    // text, which screen readers usually do not announce — a failed write was
+    // silent to anyone not looking at the screen. It also let role="status"
+    // override the button's own role, so it never read as dismissible.
     <div
+      role="status"
+      aria-live="polite"
       className="pointer-events-none fixed inset-x-0 z-50 flex justify-center px-5"
       style={{ top: 'max(0.75rem, env(safe-area-inset-top))' }}
     >
@@ -88,7 +97,6 @@ function CommandErrorBanner({ error, onDismiss }: { error: AcError | null; onDis
         {error && (
           <m.button
             type="button"
-            role="status"
             onClick={onDismiss}
             initial={reduce ? false : { opacity: 0, y: -16, scale: 0.96 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
@@ -114,5 +122,10 @@ function commandErrorText(error: AcError): string {
   if (error.kind === 'network' || error.kind === 'timeout') return 'Not sent — can’t reach the bridge';
   if (error.kind === 'ac-offline') return 'Not sent — unit offline';
   if (error.kind === 'auth') return 'Not sent — add the bridge token in Settings';
-  return error.message;
+  if (error.kind === 'rejected') return 'Not sent — the unit refused that setting';
+  // 'server': a 500, a bad gateway, anything unclassified. The raw text is a
+  // wire detail ("Request failed: 502"), which tells the person holding the
+  // phone nothing they can act on; it stays in the console for whoever debugs.
+  console.error('bridge error', error);
+  return 'Not sent — the bridge had a problem';
 }

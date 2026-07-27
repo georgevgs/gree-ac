@@ -1,9 +1,30 @@
-import type { ACState, Mode, FanSpeed, Quiet, Air, Unit } from './types';
+import type { ACState, Mode, FanSpeed, Quiet, Air, ToggleField, Unit } from './types';
 import { AIRFLOW_VERT_ZONES, AIRFLOW_HOR_ZONES, TEMP_MIN, TEMP_MAX, type AirflowZone } from '../options';
 
 // Empty VITE_BRIDGE_URL => same origin (bridge serves the PWA). Otherwise the
 // Tailscale hostname or LAN IP of the bridge, e.g. http://192.168.1.50:8481
-const BASE = (import.meta.env.VITE_BRIDGE_URL ?? '').replace(/\/$/, '') + '/api';
+const ORIGIN = (import.meta.env.VITE_BRIDGE_URL ?? '').replace(/\/$/, '');
+const BASE = ORIGIN + '/api';
+
+/** Host the API is actually reached at, for display. Settings used to show
+ *  `window.location.host`, which is where the *app* was served from: during
+ *  development that is the Vite dev server, so the row named the wrong machine. */
+export function bridgeHost(): string {
+  try {
+    return new URL(ORIGIN === '' ? window.location.href : ORIGIN).host;
+  } catch {
+    return window.location.host;
+  }
+}
+
+/** Writable options, split by value type so a typo cannot reach the bridge and
+ *  come back a 400. Mirrors TOGGLE_KEYS / ENUM_KEYS in the daemon's api.rs. */
+interface SetOption {
+  (key: ToggleField, value: boolean): Promise<ACState>;
+  (key: 'quiet', value: Quiet): Promise<ACState>;
+  (key: 'air', value: Air): Promise<ACState>;
+  (key: 'unit', value: Unit): Promise<ACState>;
+}
 
 /** Why a request failed, at the granularity the UI acts on: `network` and
  *  `timeout` mean the bridge itself is unreachable, `ac-offline` means the
@@ -41,6 +62,8 @@ export function readToken(): string {
   return localStorage.getItem(TOKEN_KEY) ?? '';
 }
 
+const TOKEN_EVENT = 'ac:token-change';
+
 export function writeToken(token: string): void {
   const trimmed = token.trim();
   if (trimmed === '') {
@@ -48,6 +71,28 @@ export function writeToken(token: string): void {
   } else {
     localStorage.setItem(TOKEN_KEY, trimmed);
   }
+  window.dispatchEvent(new Event(TOKEN_EVENT));
+}
+
+/**
+ * Run `fn` whenever the saved token changes.
+ *
+ * Fetches read the token per request, so they pick a new one up immediately.
+ * The SSE stream cannot: the token is baked into the `EventSource` URL at
+ * connect time, so without this a token typed into Settings left the stream
+ * retrying the old URL and 401ing until the app was next backgrounded, with
+ * live updates silently degraded to the poll in the meantime.
+ */
+export function onTokenChange(fn: () => void): () => void {
+  const fromOtherTab = (e: StorageEvent) => {
+    if (e.key === TOKEN_KEY || e.key === null) fn();
+  };
+  window.addEventListener(TOKEN_EVENT, fn);
+  window.addEventListener('storage', fromOtherTab);
+  return () => {
+    window.removeEventListener(TOKEN_EVENT, fn);
+    window.removeEventListener('storage', fromOtherTab);
+  };
 }
 
 // Allow-lists for every server enum. A value outside them (a newer bridge, a
@@ -229,6 +274,6 @@ export const acClient = {
     req('/fan', { method: 'POST', body: JSON.stringify({ speed }) }),
   setSwing: (vert?: string, hor?: string) =>
     req('/swing', { method: 'POST', body: JSON.stringify({ vert, hor }) }),
-  setOption: (key: string, value: boolean | string) =>
-    req('/option', { method: 'POST', body: JSON.stringify({ key, value }) }),
+  setOption: ((key, value) =>
+    req('/option', { method: 'POST', body: JSON.stringify({ key, value }) })) as SetOption,
 };

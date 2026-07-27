@@ -53,12 +53,12 @@ from.
 
 | flag | env | default | |
 |------|-----|---------|--|
-| `--host` | `AC_HOST` | `192.168.1.255` | LAN IP of the AC. Unicast beats the broadcast default: give it a static DHCP lease. |
+| `--host` | `AC_HOST` | **required** | LAN IP of the AC; give it a static DHCP lease. No broadcast default: with a `.255` target the daemon trusts whichever device answers the scan first, under an AES key that is a public protocol constant. |
 | `--ac-port` | `AC_PORT` | `7000` | GREE local UDP port. |
 | `--port` | `PORT` | `8481` | HTTP port for the API and the PWA. |
 | `--bind` | `BIND_ADDR` | `0.0.0.0` | HTTP listen address. |
 | `--poll-interval-ms` | `POLL_INTERVAL_MS` | `3000` | Status cadence against the AC. |
-| `--cors-origin` | `CORS_ORIGIN` | unset | Comma-separated allowlist, or `*`. Unset = no cross-origin access (the PWA is served same-origin). |
+| `--cors-origin` | `CORS_ORIGIN` | unset | Comma-separated origin allowlist. Unset = no cross-origin access (the PWA is served same-origin). `*` is refused: it would answer the preflight that currently blocks drive-by writes. |
 | `--public-dir` | `PUBLIC_DIR` | unset | Built PWA to serve (`pwa/dist`). Omit for API-only. |
 | `--token` | `API_TOKEN` | unset | Require `Authorization: Bearer <token>` on `/api`. |
 | | `RUST_LOG` / `GREE_LOG_LEVEL` | `info` | Log filter. |
@@ -83,9 +83,10 @@ directly. Writes are optimistic by one round trip: UDP has no ack, so the
 response echoes what was sent and the device's confirmation follows on
 `/api/events` moments later. Every POST must carry
 `Content-Type: application/json`; anything else is refused with `415`. Errors
-are `{"error":"..."}`: `400` for a bad value (the message lists what would
-have been accepted), `503` when the AC is unreachable, and the same envelope
-on `415`, `401`, and unknown `/api` routes.
+are `{"error":"..."}` on **every** `/api` failure, without exception: `400`
+for a bad value (the message lists what would have been accepted) or a
+malformed body, `401`, `405`, `413` for an oversized body, `415`, `503` when
+the AC is unreachable, and `404` on unknown `/api` routes.
 
 ```json
 {
@@ -113,8 +114,14 @@ by unit (see `../docs/reference-unit.md` for a worked example); do a first-run
 `GET /api/state` to see what your unit reports.
 
 If `--token` is set, every `/api` request must carry
-`Authorization: Bearer <token>` (`EventSource` can't send headers, so
-`/api/events?token=...` is accepted too).
+`Authorization: Bearer <token>` (the scheme is matched case-insensitively, per
+RFC 7235). `EventSource` can't send headers, so `/api/events?token=...` is
+accepted as well, on that one route only: a token in a URL can land in any
+proxy's access log.
+
+`/api/events` refuses to open more than 32 concurrent streams, answering `503`
+past that. One phone uses one; the ceiling exists so nothing on the LAN can
+walk a 512 MB Pi into the OOM killer.
 
 ## Serving the UI
 
@@ -196,7 +203,8 @@ reliable than the `.255` broadcast default once you know the address.
 ## systemd
 
 `../deploy-pi.command` installs and restarts the unit for you. By hand: copy
-`deploy/greehvacd.service` to `/etc/systemd/system/`, edit `AC_HOST`, then:
+`deploy/greehvacd.service` to `/etc/systemd/system/`, replace the
+`__AC_HOST__` placeholder with the AC's IP, then:
 
 ```sh
 sudo systemctl enable --now greehvacd
